@@ -1,0 +1,72 @@
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Verify release metadata
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EXPECTED_REPOSITORY_URL: git+https://github.com/${{ github.repository }}.git
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          PACKAGE_REPOSITORY_URL="$(node -p "require('./package.json').repository.url")"
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+
+          if [ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]; then
+            echo "Release tag ${RELEASE_TAG} does not match package.json version ${PACKAGE_VERSION}."
+            echo "Expected tag: ${EXPECTED_TAG}"
+            exit 1
+          fi
+
+          if [ "${PACKAGE_REPOSITORY_URL}" != "${EXPECTED_REPOSITORY_URL}" ]; then
+            echo "package.json repository.url must match the GitHub repository for npm trusted publishing."
+            echo "Current:  ${PACKAGE_REPOSITORY_URL}"
+            echo "Expected: ${EXPECTED_REPOSITORY_URL}"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify package contents
+        run: npm run pack:dry-run
+
+      - name: Publish to npm
+        run: npm publish --access public
