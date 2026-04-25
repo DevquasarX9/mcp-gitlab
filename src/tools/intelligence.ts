@@ -5,7 +5,7 @@ import type { JsonMap } from "../gitlab/types.js";
 import { stripUnsafeText } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 
-const blockedStatuses = new Set([
+export const blockedStatuses = new Set([
   "approvals_syncing",
   "checking",
   "ci_must_pass",
@@ -20,6 +20,10 @@ const blockedStatuses = new Set([
   "not_approved",
   "pipeline_must_succeed"
 ]);
+
+export function isBlockedMergeStatus(status: unknown): boolean {
+  return typeof status === "string" && blockedStatuses.has(status.toLowerCase());
+}
 
 function daysOld(iso: unknown): number | null {
   if (typeof iso !== "string" || iso.length === 0) {
@@ -197,8 +201,7 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       );
 
       const items = response.data.filter((mr) => {
-        const status = typeof mr.detailed_merge_status === "string" ? mr.detailed_merge_status : "";
-        return blockedStatuses.has(status);
+        return isBlockedMergeStatus(mr.detailed_merge_status);
       });
 
       return {

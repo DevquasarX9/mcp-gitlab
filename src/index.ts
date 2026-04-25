@@ -6,14 +6,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { loadConfig, type AppConfig } from "./config.js";
 import { GitLabClient } from "./gitlab/client.js";
 import { registerGroupTools } from "./tools/groups.js";
+import { registerGroupDeliveryOverviewTools } from "./tools/groupDeliveryOverview.js";
+import { registerGovernanceTools } from "./tools/governance.js";
 import { registerInstanceTools } from "./tools/instance.js";
 import { registerIntelligenceTools } from "./tools/intelligence.js";
 import { registerIssueTools } from "./tools/issues.js";
 import { registerMergeRequestTools } from "./tools/mergeRequests.js";
 import { registerPipelineTools } from "./tools/pipelines.js";
 import { registerProjectTools } from "./tools/projects.js";
+import { registerProjectDashboardTools } from "./tools/projectDashboard.js";
 import { registerReleaseTools } from "./tools/releases.js";
 import { registerRepositoryTools } from "./tools/repository.js";
+import { registerReviewStateTools } from "./tools/reviewState.js";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -33,12 +37,16 @@ export function createServer(config: AppConfig = loadConfig()): {
 
   registerInstanceTools(deps);
   registerProjectTools(deps);
+  registerProjectDashboardTools(deps);
   registerRepositoryTools(deps);
   registerIssueTools(deps);
   registerMergeRequestTools(deps);
+  registerReviewStateTools(deps);
   registerPipelineTools(deps);
   registerReleaseTools(deps);
   registerGroupTools(deps);
+  registerGroupDeliveryOverviewTools(deps);
+  registerGovernanceTools(deps);
   registerIntelligenceTools(deps);
 
   return { server, client };

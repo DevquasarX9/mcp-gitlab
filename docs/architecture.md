@@ -18,6 +18,7 @@ src/
   index.ts
   gitlab/
     client.ts
+    graphqlClient.ts
     errors.ts
     pagination.ts
     types.ts
@@ -32,9 +33,13 @@ src/
     issues.ts
     mergeRequests.ts
     pipelines.ts
+    projectDashboard.ts
+    reviewState.ts
     releases.ts
     groups.ts
+    groupDeliveryOverview.ts
     intelligence.ts
+    deliveryShared.ts
   utils/
     result.ts
 tests/
@@ -79,11 +84,12 @@ Environment-driven, with safe defaults:
 
 ## HTTP client design
 
-- Single `GitLabClient` abstraction
+- `GitLabClient` for REST endpoints and `GitLabGraphQLClient` for aggregate queries
 - JSON request helpers for `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`
+- GraphQL `query()` helper with the same auth, timeout, and payload limits
 - Timeout via `AbortSignal.timeout`
 - Response-size cap enforced before/after body read
-- Audit helper on the client for consistent logging
+- Audit helper on the REST client for consistent logging
 
 ## Pagination abstraction
 
@@ -103,6 +109,7 @@ Environment-driven, with safe defaults:
 - Map REST/GraphQL style failures into consistent user-facing errors
 - Preserve GitLab request ID when present
 - Keep detailed raw error payloads off user-facing output unless safe
+- The first GraphQL-backed aggregate tool is `gitlab_get_merge_request_review_state`
 
 ## Logging and audit
 
