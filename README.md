@@ -1,6 +1,11 @@
 # GitLab MCP Server
 
+[![npm version](https://img.shields.io/npm/v/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
+[![npm downloads](https://img.shields.io/npm/dm/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
+
 `gitlab-mcp-server` is a stdio Model Context Protocol (MCP) server for GitLab.com and self-managed GitLab. It exposes repository, issue, merge request, pipeline, release, group, and project tools with read-only defaults, guarded write operations, destructive-action confirmation, allowlists, payload limits, and optional audit logging.
+
+npm package: [gitlab-mcp-cli](https://www.npmjs.com/package/gitlab-mcp-cli)
 
 ## Installation
 
