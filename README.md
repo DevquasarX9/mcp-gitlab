@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
 [![npm downloads](https://img.shields.io/npm/dm/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
 
-`gitlab-mcp-server` is a stdio Model Context Protocol (MCP) server for GitLab.com and self-managed GitLab. It exposes repository, issue, merge request, pipeline, release, group, and project tools with read-only defaults, guarded write operations, destructive-action confirmation, allowlists, payload limits, and optional audit logging.
+`gitlab-mcp-server` is a stdio Model Context Protocol (MCP) server for GitLab.com and self-managed GitLab. It exposes repository, issue, merge request, pipeline, release, group, governance, and project tools with read-only defaults, guarded write operations, destructive-action confirmation, allowlists, payload limits, optional audit logging, and a first GraphQL-backed aggregate review tool.
 
 npm package: [gitlab-mcp-cli](https://www.npmjs.com/package/gitlab-mcp-cli)
 
@@ -146,9 +146,10 @@ The server currently includes these tool groups:
 - Projects and groups: search, metadata, members, languages, activity, statistics
 - Repository: tree, file reads, blame, compare, commits, branches, tags, code search
 - Issues: list, get, search, create, update, comment, close
-- Merge requests: list, get, diffs, discussions, create, update, comment, approve, merge
-- Pipelines: list, inspect, job traces, retry, cancel, trigger, project variables
+- Merge requests: list, get, diffs, discussions, review-state aggregate, create/update, thread creation, thread replies, resolve/unresolve, review requests, approve, merge, rebase
+- Pipelines: list, inspect, job traces, retry, cancel, trigger, project variables, failed-job summaries, flaky-job detection, run comparison, artifact metadata, job-to-MR tracing
 - Releases and packages: list, inspect, create releases, inspect packages
+- Governance: protected branches, branch protection details, approval rules, approval configuration, project write-risk analysis
 - Intelligence: project summaries, stale MRs, blocked MRs, failed pipelines, release notes, recent activity, issue-to-MR and MR-to-pipeline tracing
 
 Write-capable tools stay gated until you explicitly enable them.

@@ -23,6 +23,31 @@ export class GitLabApiError extends Error {
   }
 }
 
+export interface GitLabGraphQLErrorDetail {
+  readonly message: string;
+  readonly path?: readonly (string | number)[];
+  readonly extensions?: Record<string, unknown>;
+}
+
+export class GitLabGraphQLError extends Error {
+  public readonly endpoint: string;
+  public readonly requestId?: string;
+  public readonly details: readonly GitLabGraphQLErrorDetail[];
+
+  public constructor(params: {
+    message: string;
+    endpoint: string;
+    requestId?: string;
+    details: readonly GitLabGraphQLErrorDetail[];
+  }) {
+    super(params.message);
+    this.name = "GitLabGraphQLError";
+    this.endpoint = params.endpoint;
+    this.requestId = params.requestId;
+    this.details = params.details;
+  }
+}
+
 export class ConfigurationError extends Error {
   public constructor(message: string) {
     super(message);
@@ -74,6 +99,27 @@ export function normalizeGitLabError(input: {
   });
 }
 
+export function normalizeGitLabGraphQLError(input: {
+  endpoint: string;
+  requestId?: string | null;
+  errors: readonly GitLabGraphQLErrorDetail[];
+}): GitLabGraphQLError {
+  const summary = input.errors
+    .map((item) => item.message.trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 3)
+    .join("; ");
+
+  return new GitLabGraphQLError({
+    message: summary.length > 0
+      ? `GitLab GraphQL query failed: ${summary}`
+      : "GitLab GraphQL query failed.",
+    endpoint: input.endpoint,
+    requestId: input.requestId ?? undefined,
+    details: input.errors
+  });
+}
+
 export function buildUserFacingError(error: unknown): string {
   if (error instanceof GuardrailError) {
     return error.message;
@@ -89,6 +135,11 @@ export function buildUserFacingError(error: unknown): string {
       ? ` Retry after ${error.retryAfterSeconds} seconds.`
       : "";
     return `${error.message}${requestId}${retryAfter}`;
+  }
+
+  if (error instanceof GitLabGraphQLError) {
+    const requestId = error.requestId ? ` Request ID: ${error.requestId}.` : "";
+    return `${error.message}${requestId}`;
   }
 
   if (error instanceof Error) {

@@ -15,6 +15,7 @@ import { registerPipelineTools } from "./tools/pipelines.js";
 import { registerProjectTools } from "./tools/projects.js";
 import { registerReleaseTools } from "./tools/releases.js";
 import { registerRepositoryTools } from "./tools/repository.js";
+import { registerReviewStateTools } from "./tools/reviewState.js";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -37,6 +38,7 @@ export function createServer(config: AppConfig = loadConfig()): {
   registerRepositoryTools(deps);
   registerIssueTools(deps);
   registerMergeRequestTools(deps);
+  registerReviewStateTools(deps);
   registerPipelineTools(deps);
   registerReleaseTools(deps);
   registerGroupTools(deps);
