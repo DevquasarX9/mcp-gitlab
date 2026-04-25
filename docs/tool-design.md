@@ -60,6 +60,7 @@ Common edge handling:
 | `gitlab_get_project_languages` | Show language breakdown | `project_id` | language percentage map | project read access | `GET /projects/:id/languages` | read-only | `gitlab_get_project_languages {"project_id":"group/project"}` | empty repo returns empty map |
 | `gitlab_get_project_activity` | Show recent project events | `project_id`, filters, pagination | list of events | project read access | `GET /projects/:id/events` | read-only | `gitlab_get_project_activity {"project_id":"group/project","after":"2026-04-01T00:00:00Z"}` | event volume depends on project activity limits |
 | `gitlab_get_project_statistics` | Show storage/repo stats | `project_id` | project statistics object | project read access | `GET /projects/:id/statistics` | read-only | `gitlab_get_project_statistics {"project_id":"group/project"}` | stats availability can vary by plan/version |
+| `gitlab_get_project_dashboard` | Aggregate project health, open work, and recent pipeline highlights | `project_id`, sample limits | dashboard summary with counts, highlights, and sampled items | project read access | GitLab GraphQL `project { mergeRequests issues pipelines }` | read-only | `gitlab_get_project_dashboard {"project_id":"group/project"}` | uses bounded GraphQL sampling for open MRs/issues/recent pipelines |
 
 ## C. Repository
 
@@ -182,5 +183,5 @@ Common edge handling:
 ## REST vs GraphQL decisions in this design
 
 - Current implementation uses REST for most tools because the endpoint mapping is explicit, stable, and easier to secure with per-tool guardrails.
-- GraphQL is now used for `gitlab_get_merge_request_review_state`, where a single bounded aggregate query is materially better than REST fan-out.
+- GraphQL is now used for `gitlab_get_merge_request_review_state` and `gitlab_get_project_dashboard`, where single bounded aggregate queries are materially better than REST fan-out.
 - Additional GraphQL use should stay focused on aggregate/intelligence tools where it clearly reduces request count and latency.

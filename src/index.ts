@@ -13,6 +13,7 @@ import { registerIssueTools } from "./tools/issues.js";
 import { registerMergeRequestTools } from "./tools/mergeRequests.js";
 import { registerPipelineTools } from "./tools/pipelines.js";
 import { registerProjectTools } from "./tools/projects.js";
+import { registerProjectDashboardTools } from "./tools/projectDashboard.js";
 import { registerReleaseTools } from "./tools/releases.js";
 import { registerRepositoryTools } from "./tools/repository.js";
 import { registerReviewStateTools } from "./tools/reviewState.js";
@@ -35,6 +36,7 @@ export function createServer(config: AppConfig = loadConfig()): {
 
   registerInstanceTools(deps);
   registerProjectTools(deps);
+  registerProjectDashboardTools(deps);
   registerRepositoryTools(deps);
   registerIssueTools(deps);
   registerMergeRequestTools(deps);

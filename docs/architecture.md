@@ -33,6 +33,7 @@ src/
     issues.ts
     mergeRequests.ts
     pipelines.ts
+    projectDashboard.ts
     reviewState.ts
     releases.ts
     groups.ts
