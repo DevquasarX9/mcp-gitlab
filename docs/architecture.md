@@ -37,7 +37,9 @@ src/
     reviewState.ts
     releases.ts
     groups.ts
+    groupDeliveryOverview.ts
     intelligence.ts
+    deliveryShared.ts
   utils/
     result.ts
 tests/

@@ -4,7 +4,7 @@ import type { JsonMap } from "../gitlab/types.js";
 import { assertGroupAllowed } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 
-async function requireAllowedGroup(
+export async function requireAllowedGroup(
   groupId: string,
   deps: { client: ToolDeps["client"]; config: ToolDeps["config"] }
 ): Promise<JsonMap> {

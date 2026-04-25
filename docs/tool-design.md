@@ -151,6 +151,7 @@ Common edge handling:
 | `gitlab_list_group_members` | List group members | `group_id`, pagination | list of members | group membership visibility | `GET /groups/:id/members/all` | read-only | `gitlab_list_group_members {"group_id":"my-group"}` | inherited/private invite behavior follows GitLab rules |
 | `gitlab_list_group_issues` | List group issues | `group_id`, filters | list of issues | group/project read access | `GET /groups/:id/issues` | read-only | `gitlab_list_group_issues {"group_id":"my-group","state":"opened"}` | results span descendant projects |
 | `gitlab_list_group_merge_requests` | List group MRs | `group_id`, filters | list of MRs | group/project read access | `GET /groups/:id/merge_requests` | read-only | `gitlab_list_group_merge_requests {"group_id":"my-group","state":"opened"}` | results span descendant projects |
+| `gitlab_get_group_delivery_overview` | Aggregate group delivery signals across sampled projects, open MRs, and open issues | `group_id`, sample limits | delivery overview with counts, project samples, and attention highlights | group/project read access | GitLab GraphQL `group { projects mergeRequests issues }` | read-only | `gitlab_get_group_delivery_overview {"group_id":"my-group"}` | uses bounded GraphQL sampling and nested per-project samples |
 
 ## I. Governance
 
@@ -183,5 +184,5 @@ Common edge handling:
 ## REST vs GraphQL decisions in this design
 
 - Current implementation uses REST for most tools because the endpoint mapping is explicit, stable, and easier to secure with per-tool guardrails.
-- GraphQL is now used for `gitlab_get_merge_request_review_state` and `gitlab_get_project_dashboard`, where single bounded aggregate queries are materially better than REST fan-out.
+- GraphQL is now used for `gitlab_get_merge_request_review_state`, `gitlab_get_project_dashboard`, and `gitlab_get_group_delivery_overview`, where single bounded aggregate queries are materially better than REST fan-out.
 - Additional GraphQL use should stay focused on aggregate/intelligence tools where it clearly reduces request count and latency.
