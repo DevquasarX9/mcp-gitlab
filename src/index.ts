@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { loadConfig, type AppConfig } from "./config.js";
 import { GitLabClient } from "./gitlab/client.js";
 import { registerGroupTools } from "./tools/groups.js";
+import { registerGovernanceTools } from "./tools/governance.js";
 import { registerInstanceTools } from "./tools/instance.js";
 import { registerIntelligenceTools } from "./tools/intelligence.js";
 import { registerIssueTools } from "./tools/issues.js";
@@ -39,6 +40,7 @@ export function createServer(config: AppConfig = loadConfig()): {
   registerPipelineTools(deps);
   registerReleaseTools(deps);
   registerGroupTools(deps);
+  registerGovernanceTools(deps);
   registerIntelligenceTools(deps);
 
   return { server, client };
