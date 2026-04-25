@@ -177,17 +177,46 @@ npm run pack:dry-run
 
 Repository docs and client examples live under `docs/` and `examples/clients/`.
 
-## Publishing Notes For Maintainers
+## Manual Publishing Notes
 
-Before the first publish:
+Trusted publishing via GitHub Actions is the default release path for this repository. If you ever need a manual fallback:
 
-1. Replace the `YOUR_GITHUB_OWNER` placeholders in `package.json`.
-2. Confirm the final npm package name and version.
-3. Run `npm login` and `npm whoami`.
-4. Run `npm run clean`, `npm run build`, `npm test`, and `npm run pack:dry-run`.
-5. Publish with `npm publish` for an unscoped package or `npm publish --access public` for a public scoped package.
+1. Confirm the package name, repository metadata, and version in `package.json`.
+2. Run `npm login` and `npm whoami`.
+3. Run `npm run clean`, `npm run build`, `npm test`, and `npm run pack:dry-run`.
+4. Publish with `npm publish` for an unscoped package or `npm publish --access public` for a public scoped package.
 
-npm may prompt for an OTP if your account has 2FA enabled. If you later automate publishing, prefer npm trusted publishing with GitHub OIDC instead of long-lived npm tokens.
+npm may prompt for an OTP if your account has 2FA enabled.
+
+## Automated npm Publishing
+
+This repository also includes [publish.yml](./.github/workflows/publish.yml) for npm trusted publishing from GitHub Actions.
+
+The workflow:
+
+- runs on GitHub Release `published`
+- requires `id-token: write`
+- uses Node.js 24 to satisfy npm trusted publishing runtime requirements
+- verifies that the release tag matches `package.json` version
+- verifies that `package.json.repository.url` matches the current GitHub repository
+- runs install, typecheck, lint, test, build, and `npm pack --dry-run` before `npm publish`
+
+Configure npm trusted publishing with:
+
+- Organization or user: `DevquasarX9`
+- Repository: `mcp-gitlab`
+- Workflow filename: `publish.yml`
+- Environment name: leave empty unless you later add a protected GitHub Environment to the workflow
+
+Release flow:
+
+1. Update `package.json` version.
+2. Commit and push.
+3. Create and push a matching tag like `v0.1.1`.
+4. Publish a GitHub Release for that tag.
+5. GitHub Actions publishes the package to npm through OIDC.
+
+No `NPM_TOKEN` secret is required for publishing. Because this uses trusted publishing from GitHub Actions, npm will generate provenance automatically for a public package from a public repository.
 
 ## What Gets Published
 
