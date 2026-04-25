@@ -53,6 +53,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure version is not already published
+        shell: bash
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "Version ${PACKAGE_NAME}@${PACKAGE_VERSION} is already published."
+            exit 1
+          fi
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -70,3 +81,34 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --access public
+
+      - name: Verify published package
+        shell: bash
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          for attempt in 1 2 3 4 5; do
+            PUBLISHED_VERSION="$(npm view "${PACKAGE_NAME}" version 2>/dev/null || true)"
+
+            if [ "${PUBLISHED_VERSION}" = "${PACKAGE_VERSION}" ]; then
+              exit 0
+            fi
+
+            echo "Waiting for npm registry to report ${PACKAGE_NAME}@${PACKAGE_VERSION} (attempt ${attempt}/5)..."
+            sleep 10
+          done
+
+          echo "Published version mismatch."
+          echo "Expected: ${PACKAGE_VERSION}"
+          echo "Actual:   ${PUBLISHED_VERSION:-<unavailable>}"
+          exit 1
+
+      - name: Smoke test installed CLI
+        shell: bash
+        run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          PREFIX_DIR="${RUNNER_TEMP}/npm-smoke"
+
+          npm install --global --prefix "${PREFIX_DIR}" "${PACKAGE_NAME}@${PACKAGE_VERSION}"
+          test -x "${PREFIX_DIR}/bin/gitlab-mcp-server"

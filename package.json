@@ -51,6 +51,10 @@
     "url": "https://github.com/DevquasarX9/mcp-gitlab/issues"
   },
   "homepage": "https://github.com/DevquasarX9/mcp-gitlab#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "engines": {
     "node": ">=20.11.0"
   },
