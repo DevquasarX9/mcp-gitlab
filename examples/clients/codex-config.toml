@@ -1,0 +1,8 @@
+[mcp_servers.gitlab]
+command = "gitlab-mcp-server"
+
+[mcp_servers.gitlab.env]
+GITLAB_BASE_URL = "https://gitlab.com"
+GITLAB_TOKEN = "glpat-xxxxxxxxxxxxxxxxxxxx"
+ENABLE_WRITE_TOOLS = "false"
+ENABLE_DESTRUCTIVE_TOOLS = "false"

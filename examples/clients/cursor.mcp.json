@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "gitlab": {
+      "command": "gitlab-mcp-server",
+      "env": {
+        "GITLAB_BASE_URL": "https://gitlab.com",
+        "GITLAB_TOKEN": "glpat-xxxxxxxxxxxxxxxxxxxx",
+        "ENABLE_WRITE_TOOLS": "false",
+        "ENABLE_DESTRUCTIVE_TOOLS": "false"
+      }
+    }
+  }
+}

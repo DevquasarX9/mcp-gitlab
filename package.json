@@ -1,0 +1,69 @@
+{
+  "name": "gitlab-mcp-cli",
+  "version": "0.1.0",
+  "description": "GitLab MCP server CLI with read-only defaults and guarded write operations.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "gitlab-mcp-server": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"const { rmSync } = require('node:fs'); ['dist', 'coverage'].forEach((path) => rmSync(path, { recursive: true, force: true }));\"",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "lint": "npm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepack": "npm run clean && npm run build",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "keywords": [
+    "gitlab",
+    "mcp",
+    "model-context-protocol",
+    "server",
+    "cli",
+    "typescript",
+    "node"
+  ],
+  "author": "Ivelin Ivanov",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DevquasarX9/mcp-gitlab.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DevquasarX9/mcp-gitlab/issues"
+  },
+  "homepage": "https://github.com/DevquasarX9/mcp-gitlab#readme",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "dotenv": "17.4.2",
+    "undici": "8.1.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "tsx": "4.21.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5"
+  }
+}
