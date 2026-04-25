@@ -57,7 +57,7 @@ const PROJECT_DASHBOARD_QUERY = `
         rootRef
         empty
       }
-      mergeRequests(state: opened, first: $mergeRequestLimit) {
+      mergeRequests(state: opened, first: $mergeRequestLimit, sort: UPDATED_DESC) {
         count
         nodes {
           iid
@@ -78,11 +78,12 @@ const PROJECT_DASHBOARD_QUERY = `
           }
         }
       }
-      issues(state: opened, first: $issueLimit) {
+      issues(state: opened, first: $issueLimit, sort: UPDATED_DESC) {
         count
         nodes {
           iid
           title
+          reference
           webUrl
           dueDate
           updatedAt

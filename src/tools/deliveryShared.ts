@@ -32,6 +32,7 @@ export interface GraphQLDashboardPipeline {
 export interface GraphQLDashboardIssue {
   readonly iid?: string | null;
   readonly title?: string | null;
+  readonly reference?: string | null;
   readonly webUrl?: string | null;
   readonly dueDate?: string | null;
   readonly updatedAt?: string | null;
@@ -100,6 +101,26 @@ export function toUserSummary(user: GraphQLUser): JsonMap {
   };
 }
 
+export function extractProjectPathFromGitLabResourceUrl(resourceUrl: string | null | undefined): string | null {
+  if (typeof resourceUrl !== "string" || resourceUrl.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(resourceUrl);
+    const marker = "/-/";
+    const markerIndex = parsed.pathname.indexOf(marker);
+
+    if (markerIndex <= 1) {
+      return null;
+    }
+
+    return decodeURIComponent(parsed.pathname.slice(1, markerIndex));
+  } catch {
+    return null;
+  }
+}
+
 export function summarizeIssue(issue: GraphQLDashboardIssue): JsonMap {
   const assignees = takeNodes(issue.assignees).map(toUserSummary);
   const attentionReasons: string[] = [];
@@ -115,7 +136,9 @@ export function summarizeIssue(issue: GraphQLDashboardIssue): JsonMap {
   return {
     iid: issue.iid ?? null,
     title: issue.title ?? null,
+    reference: issue.reference ?? null,
     web_url: issue.webUrl ?? null,
+    project_path: extractProjectPathFromGitLabResourceUrl(issue.webUrl),
     due_date: issue.dueDate ?? null,
     updated_at: issue.updatedAt ?? null,
     assignees,

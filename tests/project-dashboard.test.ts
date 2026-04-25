@@ -55,6 +55,7 @@ describe("summarizeProjectDashboard", () => {
           {
             iid: "21",
             title: "Document rollout",
+            reference: "#21",
             webUrl: "https://gitlab.example.com/group/api/-/issues/21",
             dueDate: "2099-12-01",
             updatedAt: "2026-04-25T07:00:00Z",
@@ -98,6 +99,12 @@ describe("summarizeProjectDashboard", () => {
       failed_pipelines: 0,
       unassigned_issues: 0
     });
+    expect((summary.samples as Record<string, unknown>).issues).toEqual([
+      expect.objectContaining({
+        reference: "#21",
+        project_path: "group/api"
+      })
+    ]);
   });
 
   it("marks a project as needing attention when the samples include review, issue, and pipeline problems", () => {

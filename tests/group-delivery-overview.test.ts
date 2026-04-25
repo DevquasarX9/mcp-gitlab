@@ -69,6 +69,7 @@ describe("summarizeGroupDeliveryOverview", () => {
                 {
                   iid: "21",
                   title: "Document release",
+                  reference: "#21",
                   webUrl: "https://gitlab.example.com/group/platform/api/-/issues/21",
                   dueDate: "2099-12-01",
                   updatedAt: "2026-04-25T07:00:00Z",
@@ -121,6 +122,7 @@ describe("summarizeGroupDeliveryOverview", () => {
           {
             iid: "41",
             title: "Assigned issue",
+            reference: "#41",
             webUrl: "https://gitlab.example.com/group/platform/api/-/issues/41",
             dueDate: "2099-12-01",
             updatedAt: "2026-04-25T08:20:00Z",
@@ -146,6 +148,12 @@ describe("summarizeGroupDeliveryOverview", () => {
       unassigned_issues: 0,
       overdue_issues: 0
     });
+    expect((summary.samples as Record<string, unknown>).issues).toEqual([
+      expect.objectContaining({
+        reference: "#41",
+        project_path: "group/platform/api"
+      })
+    ]);
   });
 
   it("marks a group as needing attention when projects, merge requests, and issues show delivery risk", () => {
@@ -213,6 +221,7 @@ describe("summarizeGroupDeliveryOverview", () => {
                 {
                   iid: "71",
                   title: "Triage incident",
+                  reference: "#71",
                   webUrl: "https://gitlab.example.com/group/apps/web/-/issues/71",
                   dueDate: "2024-01-01",
                   updatedAt: "2026-04-25T07:00:00Z",
@@ -259,6 +268,7 @@ describe("summarizeGroupDeliveryOverview", () => {
           {
             iid: "91",
             title: "Unassigned bug",
+            reference: "#91",
             webUrl: "https://gitlab.example.com/group/apps/web/-/issues/91",
             dueDate: "2024-01-01",
             updatedAt: "2026-04-25T08:20:00Z",
@@ -283,5 +293,98 @@ describe("summarizeGroupDeliveryOverview", () => {
       unassigned_issues: 1,
       overdue_issues: 1
     });
+  });
+
+  it("does not treat archived sampled projects as active delivery risk", () => {
+    const summary = summarizeGroupDeliveryOverview({
+      id: "gid://gitlab/Group/3",
+      name: "Archive",
+      fullPath: "group/archive",
+      webUrl: "https://gitlab.example.com/groups/group/archive",
+      projects: {
+        count: 1,
+        nodes: [
+          {
+            name: "legacy",
+            fullPath: "group/archive/legacy",
+            webUrl: "https://gitlab.example.com/group/archive/legacy",
+            archived: true,
+            lastActivityAt: "2026-04-20T09:00:00Z",
+            repository: {
+              rootRef: "main",
+              empty: false
+            },
+            pipelines: {
+              count: 1,
+              nodes: [
+                {
+                  iid: "1",
+                  path: "/group/archive/legacy/-/pipelines/1",
+                  status: "FAILED",
+                  updatedAt: "2026-04-20T09:01:00Z",
+                  detailedStatus: {
+                    text: "Failed",
+                    label: "failed",
+                    group: "failed",
+                    icon: "status_failed"
+                  }
+                }
+              ]
+            },
+            mergeRequests: {
+              count: 1,
+              nodes: [
+                {
+                  iid: "1",
+                  title: "Old MR",
+                  webUrl: "https://gitlab.example.com/group/archive/legacy/-/merge_requests/1",
+                  draft: true,
+                  updatedAt: "2026-04-20T09:00:00Z",
+                  detailedMergeStatus: "DRAFT_STATUS",
+                  approvalsLeft: 1
+                }
+              ]
+            },
+            issues: {
+              count: 1,
+              nodes: [
+                {
+                  iid: "1",
+                  title: "Old issue",
+                  reference: "#1",
+                  webUrl: "https://gitlab.example.com/group/archive/legacy/-/issues/1",
+                  dueDate: "2024-01-01",
+                  updatedAt: "2026-04-20T08:00:00Z",
+                  assignees: {
+                    nodes: []
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      mergeRequests: {
+        count: 0,
+        nodes: []
+      },
+      issues: {
+        count: 0,
+        nodes: []
+      }
+    });
+
+    expect(summary.delivery_status).toBe("healthy");
+    expect(summary.health_reasons).toEqual([]);
+    expect(summary.sample_insights).toMatchObject({
+      projects_needing_attention: 0
+    });
+    expect((summary.samples as Record<string, unknown>).projects).toEqual([
+      expect.objectContaining({
+        delivery_status: "archived",
+        excluded_from_group_attention: true,
+        attention_reasons: []
+      })
+    ]);
   });
 });

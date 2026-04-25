@@ -68,7 +68,7 @@ const GROUP_DELIVERY_OVERVIEW_QUERY = `
       fullPath
       webUrl
       description
-      projects(includeSubgroups: true, first: $projectLimit) {
+      projects(includeSubgroups: true, first: $projectLimit, sort: ACTIVITY_DESC) {
         count
         nodes {
           name
@@ -95,7 +95,7 @@ const GROUP_DELIVERY_OVERVIEW_QUERY = `
               }
             }
           }
-          mergeRequests(state: opened, first: $projectNestedLimit) {
+          mergeRequests(state: opened, first: $projectNestedLimit, sort: UPDATED_DESC) {
             count
             nodes {
               iid
@@ -116,11 +116,12 @@ const GROUP_DELIVERY_OVERVIEW_QUERY = `
               }
             }
           }
-          issues(state: opened, first: $projectNestedLimit) {
+          issues(state: opened, first: $projectNestedLimit, sort: UPDATED_DESC) {
             count
             nodes {
               iid
               title
+              reference
               webUrl
               dueDate
               updatedAt
@@ -135,7 +136,7 @@ const GROUP_DELIVERY_OVERVIEW_QUERY = `
           }
         }
       }
-      mergeRequests(state: opened, first: $mergeRequestLimit) {
+      mergeRequests(state: opened, first: $mergeRequestLimit, sort: UPDATED_DESC) {
         count
         nodes {
           iid
@@ -161,11 +162,12 @@ const GROUP_DELIVERY_OVERVIEW_QUERY = `
           }
         }
       }
-      issues(state: opened, first: $issueLimit) {
+      issues(state: opened, first: $issueLimit, sort: UPDATED_DESC) {
         count
         nodes {
           iid
           title
+          reference
           webUrl
           dueDate
           updatedAt
@@ -186,6 +188,7 @@ function summarizeGroupProject(project: GraphQLGroupProject): JsonMap {
   const mergeRequests = takeNodes(project.mergeRequests).map(summarizeMergeRequest);
   const issues = takeNodes(project.issues).map(summarizeIssue);
   const pipelines = takeNodes(project.pipelines).map(summarizePipeline);
+  const isArchived = project.archived === true;
 
   const mergeRequestsNeedingAttention = mergeRequests
     .filter((item) => Array.isArray(item.attention_reasons) && item.attention_reasons.length > 0);
@@ -200,35 +203,32 @@ function summarizeGroupProject(project: GraphQLGroupProject): JsonMap {
 
   const attentionReasons: string[] = [];
 
-  if (project.archived === true) {
-    attentionReasons.push("Project is archived.");
-  }
-
-  if (project.repository?.empty === true) {
+  if (!isArchived && project.repository?.empty === true) {
     attentionReasons.push("Repository is empty.");
   }
 
-  if (failedPipelines.length > 0) {
+  if (!isArchived && failedPipelines.length > 0) {
     attentionReasons.push("Latest project pipeline sample includes failures.");
   }
 
-  if (mergeRequestsNeedingAttention.length > 0) {
+  if (!isArchived && mergeRequestsNeedingAttention.length > 0) {
     attentionReasons.push("Open project merge request sample includes items needing attention.");
   }
 
-  if (unassignedIssues.length > 0) {
+  if (!isArchived && unassignedIssues.length > 0) {
     attentionReasons.push("Open project issue sample includes unassigned issues.");
   }
 
-  if (overdueIssues.length > 0) {
+  if (!isArchived && overdueIssues.length > 0) {
     attentionReasons.push("Open project issue sample includes overdue issues.");
   }
 
   return {
+    delivery_status: isArchived ? "archived" : attentionReasons.length > 0 ? "needs_attention" : "healthy",
     name: project.name ?? null,
     full_path: project.fullPath ?? null,
     web_url: project.webUrl ?? null,
-    archived: project.archived ?? false,
+    archived: isArchived,
     last_activity_at: project.lastActivityAt ?? null,
     default_branch: project.repository?.rootRef ?? null,
     repository_empty: project.repository?.empty ?? false,
@@ -244,6 +244,7 @@ function summarizeGroupProject(project: GraphQLGroupProject): JsonMap {
       failed_pipelines: failedPipelines.length,
       running_pipelines: runningPipelines.length
     },
+    excluded_from_group_attention: isArchived,
     attention_reasons: attentionReasons,
     samples: {
       merge_requests: mergeRequests,
