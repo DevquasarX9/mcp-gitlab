@@ -1,6 +1,6 @@
 {
   "name": "gitlab-mcp-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GitLab MCP server CLI with read-only defaults and guarded write operations.",
   "type": "module",
   "main": "./dist/index.js",
