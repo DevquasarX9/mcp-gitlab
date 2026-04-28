@@ -116,6 +116,85 @@ export function findResolvableDiscussionNoteId(discussion: JsonMap): number | nu
   return null;
 }
 
+interface MergeRequestDiscussionPage {
+  readonly pagination: {
+    readonly page?: number;
+    readonly perPage?: number;
+    readonly nextPage?: number;
+    readonly prevPage?: number;
+    readonly total?: number;
+    readonly totalPages?: number;
+    readonly nextLink?: string;
+  };
+}
+
+export async function collectMergeRequestDiscussions(
+  client: Pick<ToolDeps["client"], "getJson">,
+  args: {
+    readonly projectId: string;
+    readonly mergeRequestIid: number;
+    readonly page?: number;
+    readonly perPage: number;
+    readonly maxPages: number;
+  }
+): Promise<{
+  readonly items: readonly JsonMap[];
+  readonly pagination: {
+    readonly page?: number;
+    readonly perPage: number;
+    readonly nextPage?: number;
+    readonly prevPage?: number;
+    readonly total?: number;
+    readonly totalPages?: number;
+    readonly nextLink?: string;
+    readonly pagesFetched: number;
+    readonly autoPaginated: boolean;
+  };
+}> {
+  const path = `/projects/${encodeURIComponent(args.projectId)}/merge_requests/${args.mergeRequestIid}/discussions`;
+  const autoPaginated = args.page === undefined;
+  let currentPage = args.page ?? 1;
+  let pagesFetched = 0;
+  let lastPage: MergeRequestDiscussionPage | null = null;
+  const items: JsonMap[] = [];
+
+  do {
+    const response = await client.getJson<JsonMap[]>(path, {
+      query: {
+        page: currentPage,
+        per_page: args.perPage
+      }
+    });
+
+    items.push(...response.data);
+    lastPage = {
+      pagination: response.pagination
+    };
+    pagesFetched += 1;
+
+    if (!autoPaginated || !response.pagination.nextPage || pagesFetched >= args.maxPages) {
+      break;
+    }
+
+    currentPage = response.pagination.nextPage;
+  } while (true);
+
+  return {
+    items,
+    pagination: {
+      page: args.page ?? 1,
+      perPage: args.perPage,
+      nextPage: lastPage?.pagination.nextPage,
+      prevPage: lastPage?.pagination.prevPage,
+      total: lastPage?.pagination.total ?? items.length,
+      totalPages: lastPage?.pagination.totalPages,
+      nextLink: lastPage?.pagination.nextLink,
+      pagesFetched,
+      autoPaginated
+    }
+  };
+}
+
 export function registerMergeRequestTools(deps: ToolDeps): void {
   registerTool(deps, {
     name: "gitlab_list_merge_requests",
@@ -252,20 +331,28 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
   registerTool(deps, {
     name: "gitlab_get_merge_request_discussions",
     title: "Get Merge Request Discussions",
-    description: "List all discussions for a merge request.",
+    description: "List discussions for a merge request. Auto-fetches later pages by default so older notes are included.",
     safety: "read-only",
     inputSchema: {
       project_id: z.string().trim().min(1),
-      merge_request_iid: z.number().int().positive()
+      merge_request_iid: z.number().int().positive(),
+      page: z.number().int().positive().optional(),
+      per_page: z.number().int().positive().max(100).optional().default(100),
+      max_pages: z.number().int().positive().max(20).optional().default(10)
     },
     handler: async (args, { client, requireProject }) => {
       await requireProject(args.project_id);
-      const response = await client.getJson<JsonMap[]>(
-        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/discussions`
-      );
+      const response = await collectMergeRequestDiscussions(client, {
+        projectId: args.project_id,
+        mergeRequestIid: args.merge_request_iid,
+        page: args.page,
+        perPage: args.per_page,
+        maxPages: args.max_pages
+      });
 
       return {
-        items: response.data,
+        items: response.items,
+        pagination: response.pagination,
         content_is_untrusted: true
       };
     }
