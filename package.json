@@ -1,7 +1,7 @@
 {
   "name": "gitlab-mcp-cli",
   "version": "0.1.6",
-  "description": "GitLab MCP server CLI with read-only defaults and guarded write operations.",
+  "description": "MCP server for GitLab with tools for repositories, issues, merge requests, pipelines, releases, and guarded write operations.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -34,10 +34,19 @@
   },
   "keywords": [
     "gitlab",
+    "gitlab-mcp",
     "mcp",
     "model-context-protocol",
     "server",
     "cli",
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "cursor",
+    "devops",
+    "merge-requests",
+    "pipelines",
     "typescript",
     "node"
   ],

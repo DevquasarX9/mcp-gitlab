@@ -2,30 +2,48 @@
 
 [![npm version](https://img.shields.io/npm/v/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
 [![npm downloads](https://img.shields.io/npm/dm/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
+[![CI](https://github.com/DevquasarX9/mcp-gitlab/actions/workflows/ci.yml/badge.svg)](https://github.com/DevquasarX9/mcp-gitlab/actions/workflows/ci.yml)
 
-`gitlab-mcp-server` is a stdio Model Context Protocol (MCP) server for GitLab.com and self-managed GitLab. It exposes repository, issue, merge request, pipeline, release, group, governance, and project tools with read-only defaults, guarded write operations, destructive-action confirmation, allowlists, payload limits, optional audit logging, and GraphQL-backed aggregate review and delivery dashboard tools.
+`gitlab-mcp-server` is a stdio [Model Context Protocol](https://modelcontextprotocol.io/) server for GitLab.com and self-managed GitLab.
 
-npm package: [gitlab-mcp-cli](https://www.npmjs.com/package/gitlab-mcp-cli)
+It gives AI agents and developer tools structured access to GitLab projects, repositories, issues, merge requests, pipelines, releases, governance data, and higher-level delivery summaries. The server is read-only by default and uses explicit gates for write and destructive actions.
 
-## Installation
+- npm package: [gitlab-mcp-cli](https://www.npmjs.com/package/gitlab-mcp-cli)
+- Repository: [DevquasarX9/mcp-gitlab](https://github.com/DevquasarX9/mcp-gitlab)
+- Works with: Claude Code, Claude Desktop, Codex, Cursor, and other MCP clients
 
-The default npm package name prepared in this repository is `gitlab-mcp-cli`. The installed command is `gitlab-mcp-server`.
+## Why This Server
+
+- Safe defaults: read-only mode is the default, with separate write and destructive-action gates.
+- GitLab coverage: projects, groups, repositories, issues, merge requests, pipelines, releases, packages, approvals, and protected branches.
+- AI-friendly tools: higher-level tools summarize project health, review risk, release notes, delivery status, and pipeline failures.
+- Self-managed support: works with `https://gitlab.com` and private GitLab instances.
+- Operational controls: allowlists, denylist, payload caps, timeout control, optional audit logging, and secret redaction.
+
+## Install
+
+Requirements:
+
+- Node.js `>=20.11.0`
+- A GitLab token with the scopes needed for the resources you want to access
+
+Install globally:
 
 ```bash
 npm install -g gitlab-mcp-cli
 ```
 
-You can also run it without a global install:
+Run without a global install:
 
 ```bash
 npx -y gitlab-mcp-cli
 ```
 
-If you publish under a scope later, replace `gitlab-mcp-cli` in the install and `npx` examples. The binary name can stay `gitlab-mcp-server`.
+The published package name is `gitlab-mcp-cli`. The installed executable is `gitlab-mcp-server`.
 
 ## Quick Start
 
-Run the server after setting the required environment variables:
+Run the server directly after setting the required environment variables:
 
 ```bash
 GITLAB_BASE_URL=https://gitlab.com \
@@ -43,45 +61,18 @@ GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx \
 node dist/cli.js
 ```
 
-## Configuration
+For local development, copy `.env.example` to `.env` and keep credentials out of git.
 
-Copy `.env.example` to `.env` for local development. Never commit `.env`.
+## MCP Client Setup
 
-Core settings:
+Example client configs live in [`examples/clients/`](https://github.com/DevquasarX9/mcp-gitlab/tree/main/examples/clients):
 
-- `GITLAB_BASE_URL`: GitLab base URL such as `https://gitlab.com`. The server normalizes it to `/api/v4`.
-- `GITLAB_TOKEN`: required GitLab PAT, project access token, group access token, or OAuth bearer token.
-- `GITLAB_TOKEN_HEADER_MODE`: `bearer` or `private-token`.
-- `ENABLE_WRITE_TOOLS`: defaults to `false`.
-- `ENABLE_DESTRUCTIVE_TOOLS`: defaults to `false`.
-- `ENABLE_DRY_RUN`: when `true`, guarded write tools return the intended request instead of mutating GitLab.
+- [Claude Code guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_code.md)
+- [Claude Desktop JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json)
+- [Codex TOML config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml)
+- [Cursor MCP JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
 
-Operational settings:
-
-- `PROJECT_ALLOWLIST`, `GROUP_ALLOWLIST`, `PROJECT_DENYLIST`
-- `MAX_FILE_SIZE_BYTES`, `MAX_DIFF_SIZE_BYTES`, `MAX_API_RESPONSE_BYTES`
-- `GITLAB_HTTP_TIMEOUT_MS`
-- `GITLAB_USER_AGENT`
-- `LOG_LEVEL`
-- `AUDIT_LOG_PATH`
-- `EXPOSE_SECRET_VARIABLE_VALUES`
-
-## GitLab Token Setup
-
-Recommended scopes:
-
-- Read-only mode: `read_api`
-- Write mode: `api`
-
-Notes:
-
-- Project and group access tokens also work when their scope matches the requested resources.
-- Self-managed GitLab instances may require `GITLAB_TOKEN_HEADER_MODE=private-token`.
-- Keep write and destructive modes disabled unless you explicitly need them.
-
-## MCP Client Configuration
-
-Global-install example:
+### Generic stdio config
 
 ```json
 {
@@ -99,7 +90,7 @@ Global-install example:
 }
 ```
 
-`npx` example:
+### `npx` config
 
 ```json
 {
@@ -118,7 +109,7 @@ Global-install example:
 }
 ```
 
-Basic Codex TOML example:
+### Codex TOML config
 
 ```toml
 [mcp_servers.gitlab]
@@ -131,115 +122,159 @@ ENABLE_WRITE_TOOLS = "false"
 ENABLE_DESTRUCTIVE_TOOLS = "false"
 ```
 
-## Read-Only And Write Modes
+## Configuration
 
-- Read-only is the default and is the recommended first setup for shared team use.
-- Write tools require `ENABLE_WRITE_TOOLS=true`.
-- Destructive tools require `ENABLE_DESTRUCTIVE_TOOLS=true` and `confirm_destructive=true` on the tool call.
-- `ENABLE_DRY_RUN=true` is useful before enabling write mode broadly.
+The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you already pass an `/api/v4` URL, it is preserved.
 
-## Available Tools
+### Core settings
 
-The server currently includes these tool groups:
+| Variable | Required | Default | Notes |
+|---|---|---:|---|
+| `GITLAB_BASE_URL` | No | `https://gitlab.com` | GitLab instance base URL or `/api/v4` URL |
+| `GITLAB_TOKEN` | Yes |  | GitLab PAT, project access token, group access token, or OAuth bearer token |
+| `GITLAB_TOKEN_HEADER_MODE` | No | `bearer` | Use `private-token` when required by some self-managed setups |
+| `ENABLE_WRITE_TOOLS` | No | `false` | Enables write-capable tools |
+| `ENABLE_DESTRUCTIVE_TOOLS` | No | `false` | Enables destructive tools that also require per-call confirmation |
+| `ENABLE_DRY_RUN` | No | `false` | Returns intended write requests without mutating GitLab |
 
-- Instance and auth: current user, token validation, GitLab version, accessible projects, accessible groups
-- Projects and groups: search, metadata, members, languages, activity, statistics, GraphQL-backed project dashboard, GraphQL-backed group delivery overview
-- Repository: tree, file reads, blame, compare, commits, branches, tags, code search
-- Issues: list, get, search, create, update, comment, close
-- Merge requests: list, get, diffs, discussions, review-state aggregate, create/update, thread creation, thread replies, resolve/unresolve, review requests, approve, merge, rebase
-- Pipelines: list, inspect, job traces, retry, cancel, trigger, project variables, failed-job summaries, flaky-job detection, run comparison, artifact metadata, job-to-MR tracing
-- Releases and packages: list, inspect, create releases, inspect packages
-- Governance: protected branches, branch protection details, approval rules, approval configuration, project write-risk analysis
-- Intelligence: project summaries, stale MRs, blocked MRs, failed pipelines, release notes, recent activity, issue-to-MR and MR-to-pipeline tracing
+### Access controls and limits
 
-Write-capable tools stay gated until you explicitly enable them.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PROJECT_ALLOWLIST` | empty | Comma-separated project IDs or paths that are allowed |
+| `GROUP_ALLOWLIST` | empty | Comma-separated group IDs or paths that are allowed |
+| `PROJECT_DENYLIST` | empty | Comma-separated project IDs or paths that are always denied |
+| `MAX_FILE_SIZE_BYTES` | `1048576` | Maximum repository file payload |
+| `MAX_DIFF_SIZE_BYTES` | `2097152` | Maximum diff payload |
+| `MAX_API_RESPONSE_BYTES` | `4194304` | Maximum total API response payload |
+| `GITLAB_HTTP_TIMEOUT_MS` | `30000` | Request timeout |
 
-## Security Notes
+### Operational settings
 
-- Do not commit `.env`, tokens, or local MCP client configs with credentials.
-- Prefer least-privilege tokens and allowlists for team deployments.
-- Job traces, repository files, and issue content should be treated as untrusted input.
-- Secret CI/CD variable values stay redacted unless `EXPOSE_SECRET_VARIABLE_VALUES=true`.
-- The server does not execute shell commands; it talks directly to the GitLab API.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `GITLAB_USER_AGENT` | `gitlab-mcp-server` | Custom outbound user agent |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| `AUDIT_LOG_PATH` | unset | Optional JSON-line audit log path |
+| `EXPOSE_SECRET_VARIABLE_VALUES` | `false` | Keeps CI/CD secret values redacted unless explicitly enabled |
+
+See [`.env.example`](https://github.com/DevquasarX9/mcp-gitlab/blob/main/.env.example) for a complete local template.
+
+## Token Setup
+
+Recommended scopes:
+
+- Read-only mode: `read_api`
+- Write mode: `api`
+
+Notes:
+
+- Project and group access tokens work when their scopes match the requested resources.
+- Some self-managed GitLab instances work better with `GITLAB_TOKEN_HEADER_MODE=private-token`.
+- Keep write and destructive modes off unless you explicitly need them.
+
+## Safety Model
+
+- Read-only is the default and recommended starting point.
+- Write-capable tools require `ENABLE_WRITE_TOOLS=true`.
+- Destructive tools require `ENABLE_DESTRUCTIVE_TOOLS=true` and `confirm_destructive=true` in the tool call.
+- `ENABLE_DRY_RUN=true` lets agents inspect a write request before changing GitLab.
+- Allowlists and the denylist are enforced before risky operations.
+- Secret CI/CD variable values remain redacted unless `EXPOSE_SECRET_VARIABLE_VALUES=true`.
+- The server does not execute shell commands. It talks directly to the GitLab REST and GraphQL APIs.
+
+Security details: [SECURITY.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/SECURITY.md) and [docs/security-model.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/security-model.md)
+
+## Available Tool Areas
+
+The server exposes concrete `gitlab_*` MCP tools. Representative examples:
+
+- Instance and access: `gitlab_validate_token`, `gitlab_get_current_user`, `gitlab_list_accessible_projects`
+- Projects and groups: `gitlab_search_projects`, `gitlab_get_project_dashboard`, `gitlab_get_group_delivery_overview`
+- Repository: `gitlab_get_file`, `gitlab_search_code`, `gitlab_compare_refs`, `gitlab_get_commit_diff`
+- Issues: `gitlab_list_issues`, `gitlab_create_issue`, `gitlab_add_issue_comment`
+- Merge requests: `gitlab_get_merge_request`, `gitlab_get_merge_request_review_state`, `gitlab_merge_merge_request`
+- Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
+- Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
+- Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`
+- Intelligence: `gitlab_summarize_project_status`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
+
+Write-capable tools stay unavailable until you explicitly enable them.
+
+For design notes and implementation details, see:
+
+- [docs/tool-design.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/tool-design.md)
+- [docs/architecture.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/architecture.md)
+
+## Common AI Workflows
+
+This server is useful when you want an agent to:
+
+- inspect a GitLab repository without cloning it first
+- review merge request diffs, discussions, approvals, and pipeline state together
+- summarize recent team activity across issues, merge requests, and pipelines
+- trace a failed job back to its pipeline, commit, and merge request context
+- draft release notes from tags, compares, and recent delivery activity
+- assess whether a project is safe for AI-assisted writes before enabling write mode
+
+If you want agents and other developers to discover the right tools quickly, refer to the actual MCP tool names in prompts, examples, and client instructions.
 
 ## Troubleshooting
 
-- `401 Unauthorized`: token is invalid, expired, or using the wrong header mode.
-- `403 Forbidden`: token lacks permission or the resource is outside allowlists.
+- `401 Unauthorized`: the token is invalid, expired, or using the wrong header mode.
+- `403 Forbidden`: the token lacks access or the resource is outside the configured allowlists.
 - `404 Not Found`: the resource is missing or hidden by GitLab permissions.
-- `429 Too Many Requests`: GitLab rate limit reached.
-- Large file or diff errors: increase payload limits only when you trust the workload.
-- CLI not found after source install: run `npm run build` and invoke `node dist/cli.js`.
+- `429 Too Many Requests`: the GitLab rate limit was hit.
+- Large file or diff errors: raise payload limits only when you trust the workload.
+- CLI not found from source: run `npm run build` and invoke `node dist/cli.js`.
 
 ## Development
 
 ```bash
 npm ci
-npm run lint
+npm run typecheck
 npm test
 npm run build
 npm run pack:dry-run
 ```
 
-Repository docs and client examples live under `docs/` and `examples/clients/`.
+Supporting docs:
 
-## Manual Publishing Notes
+- [CONTRIBUTING.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/CONTRIBUTING.md)
+- [CHANGELOG.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/CHANGELOG.md)
+- [docs/](https://github.com/DevquasarX9/mcp-gitlab/tree/main/docs)
 
-Trusted publishing via GitHub Actions is the default release path for this repository. If you ever need a manual fallback:
+## Publishing
 
-1. Confirm the package name, repository metadata, and version in `package.json`.
-2. Run `npm login` and `npm whoami`.
-3. Run `npm run clean`, `npm run build`, `npm test`, and `npm run pack:dry-run`.
-4. Publish with `npm publish` for an unscoped package or `npm publish --access public` for a public scoped package.
-
-npm may prompt for an OTP if your account has 2FA enabled.
-
-## Automated npm Publishing
-
-This repository also includes [publish.yml](./.github/workflows/publish.yml) for npm trusted publishing from GitHub Actions.
-
-The workflow:
-
-- runs on GitHub Release `published`
-- requires `id-token: write`
-- uses Node.js 24 to satisfy npm trusted publishing runtime requirements
-- verifies that the release tag matches `package.json` version
-- verifies that `package.json.repository.url` matches the current GitHub repository
-- runs install, typecheck, lint, test, build, and `npm pack --dry-run` before `npm publish`
-
-Configure npm trusted publishing with:
-
-- Organization or user: `DevquasarX9`
-- Repository: `mcp-gitlab`
-- Workflow filename: `publish.yml`
-- Environment name: leave empty unless you later add a protected GitHub Environment to the workflow
+This repository uses npm trusted publishing from GitHub Actions through [`publish.yml`](https://github.com/DevquasarX9/mcp-gitlab/blob/main/.github/workflows/publish.yml).
 
 Release flow:
 
 1. Update `package.json` version.
 2. Commit and push.
-3. Create and push a matching tag like `v0.1.1`.
+3. Create and push a matching tag such as `v<package-version>`.
 4. Publish a GitHub Release for that tag.
 5. GitHub Actions publishes the package to npm through OIDC.
 
-No `NPM_TOKEN` secret is required for publishing. Because this uses trusted publishing from GitHub Actions, npm will generate provenance automatically for a public package from a public repository.
+Manual fallback:
 
-## What Gets Published
+```bash
+npm login
+npm whoami
+npm run clean
+npm run build
+npm test
+npm run pack:dry-run
+npm publish --access public
+```
 
-The npm package is intentionally small. It only ships:
+No `NPM_TOKEN` secret is required for the default GitHub Actions release path.
+
+## Published Package Contents
+
+The npm tarball intentionally stays small and only publishes:
 
 - `dist/`
 - `README.md`
 - `LICENSE`
 - `package.json`
-
-Source files, tests, docs, examples, local configs, and development artifacts stay out of the published tarball.
-
-## Next Version TODO
-
-- Better Codex MCP setup guidance
-- `gitlab-mcp-server doctor`
-- `gitlab-mcp-server init`
-- `gitlab-mcp-server print-config`
-- `gitlab-mcp-server validate-token`
-- Optional setup wizard and config generator
