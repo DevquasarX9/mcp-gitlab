@@ -1,6 +1,6 @@
 {
   "name": "gitlab-mcp-cli",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "MCP server for GitLab with tools for repositories, issues, merge requests, pipelines, releases, and guarded write operations.",
   "type": "module",
   "main": "./dist/index.js",
