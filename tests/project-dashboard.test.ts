@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { isBlockedMergeStatus } from "../src/tools/intelligence.js";
-import { summarizeProjectDashboard } from "../src/tools/projectDashboard.js";
+import {
+  shouldRetryWithoutApprovalFields,
+  summarizeProjectDashboard
+} from "../src/tools/projectDashboard.js";
 
 describe("isBlockedMergeStatus", () => {
   it("treats GraphQL-style uppercase merge statuses as blocked statuses", () => {
@@ -12,6 +15,21 @@ describe("isBlockedMergeStatus", () => {
 });
 
 describe("summarizeProjectDashboard", () => {
+  it("retries with a compatibility query when approvalsLeft is not in the MergeRequest schema", () => {
+    expect(
+      shouldRetryWithoutApprovalFields(
+        new Error(
+          "GitLab GraphQL query failed: Field 'approvalsLeft' doesn't exist on type 'MergeRequest'."
+        )
+      )
+    ).toBe(true);
+    expect(
+      shouldRetryWithoutApprovalFields(
+        new Error("GitLab GraphQL query failed: Field 'milestone' doesn't exist on type 'Issue'.")
+      )
+    ).toBe(false);
+  });
+
   it("marks a clean active project as healthy", () => {
     const summary = summarizeProjectDashboard({
       id: "gid://gitlab/Project/1",
