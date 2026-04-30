@@ -36,7 +36,7 @@ interface ProjectDashboardQueryResult {
   readonly project?: GraphQLProjectDashboard | null;
 }
 
-const PROJECT_DASHBOARD_QUERY = `
+const PROJECT_DASHBOARD_QUERY_WITH_APPROVALS = `
   query GetProjectDashboard(
     $projectPath: ID!
     $mergeRequestLimit: Int!
@@ -116,6 +116,94 @@ const PROJECT_DASHBOARD_QUERY = `
     }
   }
 `;
+
+const PROJECT_DASHBOARD_QUERY_BASE = `
+  query GetProjectDashboard(
+    $projectPath: ID!
+    $mergeRequestLimit: Int!
+    $issueLimit: Int!
+    $pipelineLimit: Int!
+    $assigneeLimit: Int!
+  ) {
+    project(fullPath: $projectPath) {
+      id
+      name
+      fullPath
+      webUrl
+      description
+      archived
+      visibility
+      lastActivityAt
+      repository {
+        rootRef
+        empty
+      }
+      mergeRequests(state: opened, first: $mergeRequestLimit, sort: UPDATED_DESC) {
+        count
+        nodes {
+          iid
+          title
+          webUrl
+          draft
+          updatedAt
+          detailedMergeStatus
+          headPipeline {
+            status
+            detailedStatus {
+              text
+              label
+              group
+              icon
+            }
+          }
+        }
+      }
+      issues(state: opened, first: $issueLimit, sort: UPDATED_DESC) {
+        count
+        nodes {
+          iid
+          title
+          reference
+          webUrl
+          dueDate
+          updatedAt
+          assignees(first: $assigneeLimit) {
+            nodes {
+              username
+              name
+              webUrl
+            }
+          }
+        }
+      }
+      pipelines(first: $pipelineLimit) {
+        count
+        nodes {
+          iid
+          path
+          status
+          ref
+          sha
+          updatedAt
+          detailedStatus {
+            text
+            label
+            group
+            icon
+          }
+        }
+      }
+    }
+  }
+`;
+
+export function shouldRetryWithoutApprovalFields(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /Field 'approvalsLeft' doesn't exist on type 'MergeRequest'/i.test(error.message);
+}
 
 export function summarizeProjectDashboard(project: GraphQLProjectDashboard): JsonMap {
   const mergeRequests = takeNodes(project.mergeRequests).map(summarizeMergeRequest);
@@ -240,16 +328,31 @@ export function registerProjectDashboardTools(deps: ToolDeps): void {
         throw new Error("GitLab did not return a project path that can be used for GraphQL queries.");
       }
 
-      const response = await graphqlClient.query<ProjectDashboardQueryResult>(
-        PROJECT_DASHBOARD_QUERY,
-        {
-          projectPath,
-          mergeRequestLimit: args.merge_request_limit,
-          issueLimit: args.issue_limit,
-          pipelineLimit: args.pipeline_limit,
-          assigneeLimit: args.assignee_limit
+      const queryVariables = {
+        projectPath,
+        mergeRequestLimit: args.merge_request_limit,
+        issueLimit: args.issue_limit,
+        pipelineLimit: args.pipeline_limit,
+        assigneeLimit: args.assignee_limit
+      };
+
+      let response: ProjectDashboardQueryResult;
+
+      try {
+        response = await graphqlClient.query<ProjectDashboardQueryResult>(
+          PROJECT_DASHBOARD_QUERY_WITH_APPROVALS,
+          queryVariables
+        );
+      } catch (error) {
+        if (!shouldRetryWithoutApprovalFields(error)) {
+          throw error;
         }
-      );
+
+        response = await graphqlClient.query<ProjectDashboardQueryResult>(
+          PROJECT_DASHBOARD_QUERY_BASE,
+          queryVariables
+        );
+      }
 
       const resultProject = response.project ?? null;
 
