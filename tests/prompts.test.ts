@@ -41,9 +41,14 @@ describe("workflow prompts", () => {
     expect(names).toEqual([
       "gitlab_assess_project_write_safety_workflow",
       "gitlab_explain_failed_pipeline_workflow",
+      "gitlab_flaky_ci_triage_workflow",
       "gitlab_generate_weekly_delivery_summary_workflow",
+      "gitlab_release_readiness_check_workflow",
       "gitlab_review_merge_request_workflow",
+      "gitlab_stale_merge_request_cleanup_workflow",
       "gitlab_summarize_project_status_workflow"
+      ,
+      "gitlab_team_delivery_digest_workflow"
     ]);
 
     await Promise.all([client.close(), server.close()]);
@@ -90,6 +95,40 @@ describe("workflow prompts", () => {
     expect(text).toContain("gitlab_get_merge_request_review_state");
     expect(text).toContain("gitlab_review_merge_request_risks");
     expect(text).toContain("gitlab_trace_merge_request_to_pipeline_failures");
+
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  it("registers hero workflow prompts with task-specific tool guidance", async () => {
+    const { server } = createServer(testConfig);
+    const client = new Client({
+      name: "prompt-test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const prompt = await client.getPrompt({
+      name: "gitlab_flaky_ci_triage_workflow",
+      arguments: {
+        project_id: "group/project",
+        ref: "main"
+      }
+    });
+
+    expect(prompt.description).toBe("Flaky CI triage workflow");
+    expect(prompt.messages).toHaveLength(1);
+
+    const firstMessage = prompt.messages[0];
+    if (firstMessage === undefined || firstMessage.content.type !== "text") {
+      throw new Error("Expected flaky CI prompt to return a text message.");
+    }
+
+    expect(firstMessage.content.text).toContain('Investigate flaky CI behavior in project "group/project".');
+    expect(firstMessage.content.text).toContain("gitlab_find_flaky_jobs");
+    expect(firstMessage.content.text).toContain("gitlab_compare_pipeline_runs");
+    expect(firstMessage.content.text).toContain("gitlab_trace_job_to_commit_and_merge_request");
 
     await Promise.all([client.close(), server.close()]);
   });

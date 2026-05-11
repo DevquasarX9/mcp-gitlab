@@ -239,4 +239,198 @@ export function registerPromptTools(server: McpServer): void {
       ]
     })
   );
+
+  server.registerPrompt(
+    "gitlab_stale_merge_request_cleanup_workflow",
+    {
+      title: "Stale Merge Request Cleanup Workflow",
+      description:
+        "Guide the model through reviewing stale merge requests so a team can close, reassign, rebase, or unblock them.",
+      argsSchema: {
+        project_id: z.string().trim().min(1).describe("GitLab project path or numeric ID."),
+        stale_after_days: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional staleness threshold in days, for example 14 or 21."),
+        include_drafts: z
+          .enum(["yes", "no"])
+          .optional()
+          .describe("Whether draft merge requests should be included in the cleanup review.")
+      }
+    },
+    async ({ project_id, stale_after_days, include_drafts }) => ({
+      description: "Stale merge request cleanup workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Review stale merge requests in project "${project_id}".`,
+            `Staleness threshold: ${stale_after_days ?? "14"} days.`,
+            `Include drafts: ${include_drafts ?? "no"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_find_stale_merge_requests",
+            "- gitlab_find_blocked_merge_requests",
+            "- gitlab_get_merge_request_review_state",
+            "- gitlab_review_merge_request_risks",
+            "",
+            "Return:",
+            "1. the stale merge requests that need action first",
+            "2. the likely reason each one is stalled",
+            "3. whether each item should be merged, rebased, reassigned, commented on, or closed",
+            "4. the smallest useful cleanup plan for the team"
+          ])
+        )
+      ]
+    })
+  );
+
+  server.registerPrompt(
+    "gitlab_flaky_ci_triage_workflow",
+    {
+      title: "Flaky CI Triage Workflow",
+      description:
+        "Guide the model through identifying unstable CI jobs and separating flaky failures from deterministic breakages.",
+      argsSchema: {
+        project_id: z.string().trim().min(1).describe("GitLab project path or numeric ID."),
+        ref: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional branch or ref to focus on."),
+        investigation_window: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional recent pipeline window description, such as last 10 pipelines.")
+      }
+    },
+    async ({ project_id, ref, investigation_window }) => ({
+      description: "Flaky CI triage workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Investigate flaky CI behavior in project "${project_id}".`,
+            `Ref focus: ${ref ?? "all relevant refs"}.`,
+            `Investigation window: ${investigation_window ?? "recent pipeline history"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_find_failed_pipelines",
+            "- gitlab_find_flaky_jobs",
+            "- gitlab_compare_pipeline_runs",
+            "- gitlab_get_pipeline_failed_jobs_summary",
+            "- gitlab_explain_failed_pipeline",
+            "- gitlab_trace_job_to_commit_and_merge_request",
+            "",
+            "Return:",
+            "1. the jobs most likely to be flaky",
+            "2. the evidence for flakiness versus deterministic failure",
+            "3. which recent pipelines are best examples",
+            "4. likely ownership or code paths involved",
+            "5. the next triage actions"
+          ])
+        )
+      ]
+    })
+  );
+
+  server.registerPrompt(
+    "gitlab_release_readiness_check_workflow",
+    {
+      title: "Release Readiness Check Workflow",
+      description:
+        "Guide the model through assessing whether a project looks ready for release based on merge request, issue, pipeline, and release-note signals.",
+      argsSchema: {
+        project_id: z.string().trim().min(1).describe("GitLab project path or numeric ID."),
+        target_ref: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional target branch, tag, or release ref."),
+        release_goal: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional release framing, such as patch release, weekly release, or production rollout.")
+      }
+    },
+    async ({ project_id, target_ref, release_goal }) => ({
+      description: "Release readiness check workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Assess release readiness for project "${project_id}".`,
+            `Target ref: ${target_ref ?? "default branch or current release target"}.`,
+            `Release goal: ${release_goal ?? "general release readiness"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_get_project_dashboard",
+            "- gitlab_summarize_project_status",
+            "- gitlab_find_failed_pipelines",
+            "- gitlab_find_blocked_merge_requests",
+            "- gitlab_find_unassigned_issues",
+            "- gitlab_generate_release_notes",
+            "",
+            "Return:",
+            "1. whether the project looks release-ready",
+            "2. the top blockers or missing validations",
+            "3. risky merge requests, issues, or pipelines",
+            "4. what should be fixed or confirmed before release",
+            "5. a clear go, caution, or hold recommendation"
+          ])
+        )
+      ]
+    })
+  );
+
+  server.registerPrompt(
+    "gitlab_team_delivery_digest_workflow",
+    {
+      title: "Team Delivery Digest Workflow",
+      description:
+        "Guide the model through generating a concise team delivery digest for a project or group that is ready to paste into chat or status updates.",
+      argsSchema: {
+        scope_type: z
+          .enum(["project", "group"])
+          .describe("Whether the digest target is a single project or a group."),
+        scope_id: z.string().trim().min(1).describe("GitLab project or group path, or numeric ID."),
+        days: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional reporting window in days, for example 7.")
+      }
+    },
+    async ({ scope_type, scope_id, days }) => ({
+      description: "Team delivery digest workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Generate a team delivery digest for ${scope_type} "${scope_id}".`,
+            `Reporting window: ${days ?? "7"} days.`,
+            "",
+            "Use these tools as needed:",
+            ...(scope_type === "project"
+              ? [
+                  "- gitlab_get_project_dashboard",
+                  "- gitlab_summarize_recent_activity",
+                  "- gitlab_find_failed_pipelines",
+                  "- gitlab_generate_release_notes"
+                ]
+              : [
+                  "- gitlab_get_group_delivery_overview",
+                  "- gitlab_list_group_merge_requests",
+                  "- gitlab_list_group_issues"
+                ]),
+            "",
+            "Return:",
+            "1. a short digest of what moved this week",
+            "2. important blockers or regressions",
+            "3. review and pipeline health signals",
+            "4. a concise chat-ready summary version"
+          ])
+        )
+      ]
+    })
+  );
 }
