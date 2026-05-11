@@ -11,6 +11,7 @@ import {
   formatReleaseReadinessMarkdown,
   formatProjectStatusMarkdown,
   formatReleaseNotesMarkdown,
+  formatStaleMergeRequestCleanupMarkdown,
   outputFormatSchema,
   presentOutput
 } from "./output.js";
@@ -320,6 +321,138 @@ export function summarizeFlakyCiTriageAssessment(input: {
           duration_change_count: 0
         }
       },
+    content_is_untrusted: true
+  };
+}
+
+interface StaleMergeRequestCleanupItemInput {
+  readonly mergeRequest: JsonMap;
+  readonly unresolvedDiscussionCount: number;
+  readonly latestPipelineStatus: string | null;
+}
+
+function recommendStaleMergeRequestAction(input: StaleMergeRequestCleanupItemInput): {
+  readonly recommendedAction: string;
+  readonly reason: string;
+} {
+  const detailedMergeStatus = normalizeStatus(input.mergeRequest.detailed_merge_status);
+
+  if (Boolean(input.mergeRequest.draft) || String(input.mergeRequest.title ?? "").startsWith("Draft:")) {
+    return {
+      recommendedAction: "close_or_reassign",
+      reason: "The merge request is still a draft and appears to have stalled without recent progress."
+    };
+  }
+
+  if (Boolean(input.mergeRequest.has_conflicts) || detailedMergeStatus === "conflict") {
+    return {
+      recommendedAction: "rebase_or_resolve_conflicts",
+      reason: "The merge request cannot move forward until conflicts are resolved."
+    };
+  }
+
+  if (input.latestPipelineStatus === "failed") {
+    return {
+      recommendedAction: "fix_pipeline",
+      reason: "The latest merge request pipeline failed, so CI should be restored before review continues."
+    };
+  }
+
+  if (input.unresolvedDiscussionCount > 0 || detailedMergeStatus === "discussions_not_resolved") {
+    return {
+      recommendedAction: "resolve_discussions",
+      reason: "There are unresolved review discussions blocking the merge request from progressing."
+    };
+  }
+
+  if (isBlockedMergeStatus(detailedMergeStatus)) {
+    return {
+      recommendedAction: "unblock_review_state",
+      reason: `The merge request is currently blocked by merge status "${detailedMergeStatus}".`
+    };
+  }
+
+  return {
+    recommendedAction: "comment_for_owner_decision",
+    reason: "The merge request looks inactive without a single obvious blocker, so ownership and intent should be clarified."
+  };
+}
+
+export function summarizeStaleMergeRequestCleanupAssessment(input: {
+  readonly project: JsonMap;
+  readonly staleAfterDays: number;
+  readonly staleMergeRequests: readonly JsonMap[];
+  readonly blockedStaleMergeRequests: readonly JsonMap[];
+  readonly cleanupItems: readonly JsonMap[];
+}): JsonMap {
+  const draftStaleMergeRequests = input.staleMergeRequests.filter(
+    (mergeRequest) =>
+      Boolean(mergeRequest.draft) || String(mergeRequest.title ?? "").startsWith("Draft:")
+  );
+  const warnings: string[] = [];
+  const nextActions: string[] = [];
+
+  if (input.blockedStaleMergeRequests.length > 0) {
+    warnings.push(
+      `${input.blockedStaleMergeRequests.length} stale merge requests are explicitly blocked by merge state.`
+    );
+    nextActions.push(
+      "Start with the blocked stale merge requests because they have a clear unblock path and release-risk implications."
+    );
+  }
+
+  if (draftStaleMergeRequests.length > 0) {
+    warnings.push(`${draftStaleMergeRequests.length} stale merge requests are still drafts.`);
+    nextActions.push("Confirm whether stale draft merge requests should be revived, reassigned, or closed.");
+  }
+
+  if (input.cleanupItems.some((item) => item.recommended_action === "fix_pipeline")) {
+    nextActions.push("Repair failed merge request pipelines before asking reviewers to re-engage.");
+  }
+
+  if (input.cleanupItems.some((item) => item.recommended_action === "resolve_discussions")) {
+    nextActions.push("Resolve or explicitly defer open review discussions on the oldest stale merge requests.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("No stale merge request cleanup is needed right now.");
+  }
+
+  const cleanupStatus =
+    input.blockedStaleMergeRequests.length > 0
+      ? "needs_unblock"
+      : input.staleMergeRequests.length > 0
+        ? "needs_triage"
+        : "clean";
+
+  const summary =
+    cleanupStatus === "needs_unblock"
+      ? "Several stale merge requests have explicit blockers and should be unblocked or closed before they continue to age."
+      : cleanupStatus === "needs_triage"
+        ? "There are stale merge requests that need ownership and disposition decisions, even if they are not formally blocked."
+        : "No stale merge requests were found in the sampled open merge request set.";
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace: input.project.path_with_namespace ?? null,
+      default_branch: input.project.default_branch ?? null
+    },
+    stale_after_days: input.staleAfterDays,
+    cleanup_status: cleanupStatus,
+    summary,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      stale_merge_request_count: input.staleMergeRequests.length,
+      blocked_stale_merge_request_count: input.blockedStaleMergeRequests.length,
+      draft_stale_merge_request_count: draftStaleMergeRequests.length
+    },
+    cleanup_items: input.cleanupItems,
+    highlights: {
+      stale_merge_requests: input.staleMergeRequests.slice(0, 5),
+      blocked_stale_merge_requests: input.blockedStaleMergeRequests.slice(0, 5)
+    },
     content_is_untrusted: true
   };
 }
@@ -944,6 +1077,124 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       });
 
       return presentOutput(args.output_format, result, formatFlakyCiTriageMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_stale_merge_request_cleanup",
+    title: "Stale Merge Request Cleanup",
+    description:
+      "Triage stale merge requests and recommend whether they should be merged, rebased, reassigned, commented on, or closed.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      stale_after_days: z.number().int().positive().max(90).optional().default(14),
+      include_drafts: z.boolean().optional().default(false),
+      per_page: z.number().int().positive().max(100).optional().default(50),
+      max_detailed_items: z.number().int().positive().max(10).optional().default(5),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject }) => {
+      const project = await requireProject(args.project_id);
+      const mergeRequestsResponse = await client.getJson<JsonMap[]>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests`,
+        {
+          query: {
+            state: "opened",
+            scope: "all",
+            per_page: args.per_page
+          }
+        }
+      );
+
+      const staleMergeRequests = mergeRequestsResponse.data.filter((mergeRequest) => {
+        const draft =
+          Boolean(mergeRequest.draft) || String(mergeRequest.title ?? "").startsWith("Draft:");
+        if (!args.include_drafts && draft) {
+          return false;
+        }
+
+        const age = daysOld(mergeRequest.updated_at);
+        return age !== null && age >= args.stale_after_days;
+      });
+      const blockedStaleMergeRequests = staleMergeRequests.filter((mergeRequest) =>
+        isBlockedMergeStatus(mergeRequest.detailed_merge_status)
+      );
+
+      const cleanupItems = await Promise.all(
+        staleMergeRequests.slice(0, args.max_detailed_items).map(async (mergeRequest) => {
+          const mergeRequestIid = asNumber(mergeRequest.iid);
+          if (mergeRequestIid === null) {
+            return {
+              merge_request: mergeRequest,
+              unresolved_discussion_count: 0,
+              latest_pipeline_status: null,
+              recommended_action: "comment_for_owner_decision",
+              reason: "The merge request IID was missing, so detailed triage could not be completed."
+            };
+          }
+
+          const [detailsResponse, pipelinesResponse, discussionsResponse] = await Promise.all([
+            client.getJson<JsonMap>(
+              `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${mergeRequestIid}`,
+              {
+                query: {
+                  include_diverged_commits_count: true,
+                  include_rebase_in_progress: true
+                }
+              }
+            ),
+            client.getJson<JsonMap[]>(
+              `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${mergeRequestIid}/pipelines`
+            ),
+            client.getJson<JsonMap[]>(
+              `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${mergeRequestIid}/discussions`
+            )
+          ]);
+
+          const detailedMergeRequest = detailsResponse.data;
+          const unresolvedDiscussionCount = discussionsResponse.data.filter((discussion) =>
+            takeArray<JsonMap>(discussion.notes).some(
+              (note) => note.resolvable === true && note.resolved !== true
+            )
+          ).length;
+          const latestPipelineStatus = asString(pipelinesResponse.data[0]?.status);
+          const recommendation = recommendStaleMergeRequestAction({
+            mergeRequest: detailedMergeRequest,
+            unresolvedDiscussionCount,
+            latestPipelineStatus
+          });
+
+          return {
+            merge_request: {
+              iid: detailedMergeRequest.iid ?? mergeRequestIid,
+              title: detailedMergeRequest.title ?? mergeRequest.title ?? null,
+              web_url: detailedMergeRequest.web_url ?? mergeRequest.web_url ?? null,
+              updated_at: detailedMergeRequest.updated_at ?? mergeRequest.updated_at ?? null,
+              detailed_merge_status:
+                detailedMergeRequest.detailed_merge_status ?? mergeRequest.detailed_merge_status ?? null,
+              draft:
+                detailedMergeRequest.draft ??
+                mergeRequest.draft ??
+                String(detailedMergeRequest.title ?? mergeRequest.title ?? "").startsWith("Draft:")
+            },
+            unresolved_discussion_count: unresolvedDiscussionCount,
+            latest_pipeline_status: latestPipelineStatus,
+            recommended_action: recommendation.recommendedAction,
+            reason: recommendation.reason
+          };
+        })
+      );
+
+      const result = summarizeStaleMergeRequestCleanupAssessment({
+        project,
+        staleAfterDays: args.stale_after_days,
+        staleMergeRequests,
+        blockedStaleMergeRequests,
+        cleanupItems
+      });
+
+      return presentOutput(args.output_format, result, formatStaleMergeRequestCleanupMarkdown);
     }
   });
 

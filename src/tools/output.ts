@@ -52,6 +52,18 @@ function stringValue(value: unknown, fallback = "n/a"): string {
   return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
+function scalarValue(value: unknown, fallback = "n/a"): string {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return fallback;
+}
+
 function numberValue(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -83,7 +95,7 @@ function summarizeIssue(issue: JsonMap): string {
 }
 
 function summarizeMergeRequest(mergeRequest: JsonMap): string {
-  const iid = stringValue(mergeRequest.iid ?? mergeRequest.id, "mr");
+  const iid = scalarValue(mergeRequest.iid ?? mergeRequest.id, "mr");
   const title = stringValue(mergeRequest.title, "Untitled merge request");
 
   return `!${iid}: ${title}`;
@@ -301,6 +313,38 @@ export function formatFlakyCiTriageMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatStaleMergeRequestCleanupMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const signals = asMap(data.signals);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const cleanupItems = asList(data.cleanup_items);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Stale Merge Request Cleanup: ${stringValue(project.path_with_namespace ?? project.full_path ?? project.id, "unknown project")}`,
+    "",
+    `- Cleanup status: ${stringValue(data.cleanup_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Staleness threshold (days): ${numberValue(data.stale_after_days)}`,
+    `- Stale merge request sample count: ${numberValue(signals.stale_merge_request_count)}`,
+    `- Blocked stale merge request sample count: ${numberValue(signals.blocked_stale_merge_request_count)}`,
+    `- Draft stale merge request sample count: ${numberValue(signals.draft_stale_merge_request_count)}`,
+    "",
+    "## Priority Cleanup Items",
+    ...bulletList(limitedList(cleanupItems, summarizeCleanupItem, 8)),
+    "",
+    "## Highlighted Stale Merge Requests",
+    ...bulletList(limitedList(asList(highlights.stale_merge_requests), summarizeMergeRequest, 5)),
+    "",
+    "## Highlighted Blocked Stale Merge Requests",
+    ...bulletList(limitedList(asList(highlights.blocked_stale_merge_requests), summarizeMergeRequest, 5)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
@@ -346,4 +390,14 @@ function summarizeFlakyJob(job: JsonMap): string {
     : "n/a";
 
   return `${name} (samples: ${numberValue(job.sample_count)}, failures: ${numberValue(job.failure_count)}, failure rate: ${failureRate})`;
+}
+
+function summarizeCleanupItem(item: JsonMap): string {
+  const mergeRequest = asMap(item.merge_request);
+  const title = stringValue(mergeRequest.title, "Untitled merge request");
+  const iid = scalarValue(mergeRequest.iid, "mr");
+  const action = stringValue(item.recommended_action, "review");
+  const reason = stringValue(item.reason, "Needs review");
+
+  return `!${iid}: ${title} -> ${action} (${reason})`;
 }

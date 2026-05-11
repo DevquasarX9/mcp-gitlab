@@ -269,6 +269,7 @@ export function registerPromptTools(server: McpServer): void {
             `Include drafts: ${include_drafts ?? "no"}.`,
             "",
             "Use these tools as needed:",
+            "- gitlab_stale_merge_request_cleanup",
             "- gitlab_find_stale_merge_requests",
             "- gitlab_find_blocked_merge_requests",
             "- gitlab_get_merge_request_review_state",
