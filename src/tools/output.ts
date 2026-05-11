@@ -345,6 +345,44 @@ export function formatStaleMergeRequestCleanupMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatTeamDeliveryDigestMarkdown(data: JsonMap): string {
+  const scope = asMap(data.scope);
+  const signals = asMap(data.signals);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Team Delivery Digest: ${stringValue(data.scope_type, "scope")} ${stringValue(scope.path_with_namespace ?? scope.full_path ?? scope.name ?? scope.id, "unknown scope")}`,
+    "",
+    `- Reporting window (days): ${numberValue(data.reporting_window_days)}`,
+    `- Digest status: ${stringValue(data.digest_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Chat-ready summary: ${stringValue(data.chat_ready_summary, "n/a")}`,
+    `- Open merge requests: ${numberValue(signals.open_merge_request_count)}`,
+    `- Merge requests needing attention: ${numberValue(signals.merge_requests_needing_attention_count)}`,
+    `- Open issues: ${numberValue(signals.open_issue_count)}`,
+    `- Unassigned issues: ${numberValue(signals.unassigned_issue_count)}`,
+    `- Failed pipeline signals: ${numberValue(signals.failed_pipeline_signal_count)}`,
+    `- Running pipeline signals: ${numberValue(signals.running_pipeline_signal_count)}`,
+    "",
+    "## Highlighted Merge Requests",
+    ...bulletList(limitedList(asList(highlights.merge_requests), summarizeMergeRequest, 5)),
+    "",
+    "## Highlighted Issues",
+    ...bulletList(limitedList(asList(highlights.issues), summarizeIssue, 5)),
+    "",
+    "## Failed Pipelines",
+    ...bulletList(limitedList(asList(highlights.failed_pipelines), summarizePipeline, 5)),
+    "",
+    "## Projects Needing Attention",
+    ...bulletList(limitedList(asList(highlights.projects_needing_attention), summarizeAttentionProject, 5)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
@@ -400,4 +438,15 @@ function summarizeCleanupItem(item: JsonMap): string {
   const reason = stringValue(item.reason, "Needs review");
 
   return `!${iid}: ${title} -> ${action} (${reason})`;
+}
+
+function summarizeAttentionProject(project: JsonMap): string {
+  const path = stringValue(
+    project.path_with_namespace ?? project.full_path ?? project.name ?? project.id,
+    "unknown project"
+  );
+  const latestPipelineStatus = stringValue(project.latest_pipeline_status, "unknown");
+  const attentionReason = stringValue(project.attention_reason, "Needs attention");
+
+  return `${path} (${latestPipelineStatus}) - ${attentionReason}`;
 }

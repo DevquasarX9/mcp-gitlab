@@ -415,12 +415,14 @@ export function registerPromptTools(server: McpServer): void {
             "Use these tools as needed:",
             ...(scope_type === "project"
               ? [
+                  "- gitlab_team_delivery_digest",
                   "- gitlab_get_project_dashboard",
                   "- gitlab_summarize_recent_activity",
                   "- gitlab_find_failed_pipelines",
                   "- gitlab_generate_release_notes"
                 ]
               : [
+                  "- gitlab_team_delivery_digest",
                   "- gitlab_get_group_delivery_overview",
                   "- gitlab_list_group_merge_requests",
                   "- gitlab_list_group_issues"

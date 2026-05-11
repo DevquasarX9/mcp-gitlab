@@ -12,10 +12,12 @@ import {
   formatProjectStatusMarkdown,
   formatReleaseNotesMarkdown,
   formatStaleMergeRequestCleanupMarkdown,
+  formatTeamDeliveryDigestMarkdown,
   outputFormatSchema,
   presentOutput
 } from "./output.js";
 import { comparePipelineJobSets, detectFlakyJobs } from "./pipelines.js";
+import { requireAllowedGroup } from "./groups.js";
 
 export const blockedStatuses = new Set([
   "approvals_syncing",
@@ -56,6 +58,14 @@ function takeArray<T>(value: unknown): readonly T[] {
 
 function issueKey(issue: JsonMap): string {
   return `${issue.project_id ?? "unknown"}:${issue.iid ?? issue.id ?? "unknown"}`;
+}
+
+function isDraftMergeRequest(mergeRequest: JsonMap): boolean {
+  return Boolean(mergeRequest.draft) || String(mergeRequest.title ?? "").startsWith("Draft:");
+}
+
+function mergeRequestNeedsAttention(mergeRequest: JsonMap): boolean {
+  return isDraftMergeRequest(mergeRequest) || isBlockedMergeStatus(mergeRequest.detailed_merge_status);
 }
 
 function summarizePipelineStatus(pipelines: readonly JsonMap[]): Record<string, number> {
@@ -452,6 +462,173 @@ export function summarizeStaleMergeRequestCleanupAssessment(input: {
     highlights: {
       stale_merge_requests: input.staleMergeRequests.slice(0, 5),
       blocked_stale_merge_requests: input.blockedStaleMergeRequests.slice(0, 5)
+    },
+    content_is_untrusted: true
+  };
+}
+
+export function summarizeTeamDeliveryDigestAssessment(
+  input:
+    | {
+        readonly scopeType: "project";
+        readonly scope: JsonMap;
+        readonly reportingWindowDays: number;
+        readonly recentEventCount: number;
+        readonly openMergeRequests: readonly JsonMap[];
+        readonly openIssues: readonly JsonMap[];
+        readonly pipelineSignals: readonly JsonMap[];
+      }
+    | {
+        readonly scopeType: "group";
+        readonly scope: JsonMap;
+        readonly reportingWindowDays: number;
+        readonly openMergeRequests: readonly JsonMap[];
+        readonly openIssues: readonly JsonMap[];
+        readonly sampledProjects: readonly JsonMap[];
+      }
+): JsonMap {
+  const openMergeRequests = input.openMergeRequests;
+  const mergeRequestsNeedingAttention = openMergeRequests.filter(mergeRequestNeedsAttention);
+  const openIssues = input.openIssues;
+  const unassignedIssues = openIssues.filter(
+    (issue) => takeArray<JsonMap>(issue.assignees).length === 0
+  );
+  const warnings: string[] = [];
+  const nextActions: string[] = [];
+
+  let failedPipelineSignalCount = 0;
+  let runningPipelineSignalCount = 0;
+  let projectsNeedingAttention: readonly JsonMap[] = [];
+  let failedPipelines: readonly JsonMap[] = [];
+
+  if (input.scopeType === "project") {
+    failedPipelines = input.pipelineSignals.filter(
+      (pipeline) => normalizeStatus(pipeline.status) === "failed"
+    );
+    failedPipelineSignalCount = failedPipelines.length;
+    runningPipelineSignalCount = input.pipelineSignals.filter((pipeline) =>
+      activePipelineStatuses.has(normalizeStatus(pipeline.status))
+    ).length;
+  } else {
+    projectsNeedingAttention = input.sampledProjects.filter(
+      (project) => typeof project.attention_reason === "string" && project.attention_reason.length > 0
+    );
+    failedPipelineSignalCount = input.sampledProjects.filter(
+      (project) => normalizeStatus(project.latest_pipeline_status) === "failed"
+    ).length;
+    runningPipelineSignalCount = input.sampledProjects.filter((project) =>
+      activePipelineStatuses.has(normalizeStatus(project.latest_pipeline_status))
+    ).length;
+  }
+
+  if (failedPipelineSignalCount > 0) {
+    warnings.push(
+      input.scopeType === "project"
+        ? `${failedPipelineSignalCount} recent pipelines failed in the reporting window.`
+        : `${failedPipelineSignalCount} sampled projects have a latest pipeline in failed state.`
+    );
+    nextActions.push(
+      input.scopeType === "project"
+        ? "Restore the failing project pipelines before broad delivery communication."
+        : "Start with the sampled projects whose latest pipelines are failing."
+    );
+  }
+
+  if (mergeRequestsNeedingAttention.length > 0) {
+    warnings.push(`${mergeRequestsNeedingAttention.length} open merge requests need review attention.`);
+    nextActions.push("Triage the blocked or draft merge requests that are slowing delivery flow.");
+  }
+
+  if (unassignedIssues.length > 0) {
+    warnings.push(`${unassignedIssues.length} open issues do not currently have an assignee.`);
+    nextActions.push("Assign or explicitly defer unowned issues so the team digest reflects clear ownership.");
+  }
+
+  if (runningPipelineSignalCount > 0) {
+    warnings.push(
+      input.scopeType === "project"
+        ? `${runningPipelineSignalCount} recent pipelines are still running.`
+        : `${runningPipelineSignalCount} sampled projects still have a latest pipeline in progress.`
+    );
+    nextActions.push("Wait for the active pipelines to finish before treating the digest as fully stable.");
+  }
+
+  if (input.scopeType === "group" && projectsNeedingAttention.length > 0) {
+    nextActions.push("Focus first on the sampled projects that already show an explicit attention reason.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Share the digest and continue the current delivery cadence.");
+  }
+
+  const digestStatus =
+    failedPipelineSignalCount > 0 ||
+    mergeRequestsNeedingAttention.length > 0 ||
+    unassignedIssues.length > 0 ||
+    projectsNeedingAttention.length > 0
+      ? "needs_attention"
+      : runningPipelineSignalCount > 0
+        ? "watch"
+        : "healthy";
+
+  const scopeLabel =
+    input.scopeType === "project"
+      ? asString(input.scope.path_with_namespace) ?? asString(input.scope.full_path) ?? "project"
+      : asString(input.scope.full_path) ?? asString(input.scope.name) ?? "group";
+  const activitySummary =
+    input.scopeType === "project"
+      ? `${input.recentEventCount} recent events in ${input.reportingWindowDays} days`
+      : `${input.sampledProjects.length} sampled projects in ${input.reportingWindowDays} days`;
+  const summary =
+    digestStatus === "needs_attention"
+      ? "Delivery is active, but the current signals show concrete items that need follow-up before this is a clean status update."
+      : digestStatus === "watch"
+        ? "Delivery looks broadly healthy, but there are still active pipeline signals worth watching."
+        : "Delivery looks healthy in the current sample, with no major blockers surfaced by the digest.";
+  const chatReadySummary =
+    input.scopeType === "project"
+      ? `${scopeLabel}: ${activitySummary}, ${openMergeRequests.length} open MRs, ${openIssues.length} open issues, ${failedPipelineSignalCount} failed pipelines, ${mergeRequestsNeedingAttention.length} MRs needing attention, ${unassignedIssues.length} unassigned issues.`
+      : `${scopeLabel}: ${activitySummary}, ${openMergeRequests.length} open MRs, ${openIssues.length} open issues, ${projectsNeedingAttention.length} sampled projects needing attention, ${failedPipelineSignalCount} failed latest-pipeline signals, ${unassignedIssues.length} unassigned issues.`;
+
+  return {
+    scope_type: input.scopeType,
+    scope:
+      input.scopeType === "project"
+        ? {
+            id: input.scope.id ?? null,
+            path_with_namespace:
+              input.scope.path_with_namespace ?? input.scope.full_path ?? null,
+            default_branch: input.scope.default_branch ?? null
+          }
+        : {
+            id: input.scope.id ?? null,
+            name: input.scope.name ?? null,
+            full_path: input.scope.full_path ?? null,
+            web_url: input.scope.web_url ?? null
+          },
+    reporting_window_days: input.reportingWindowDays,
+    digest_status: digestStatus,
+    summary,
+    chat_ready_summary: chatReadySummary,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      recent_activity_event_count: input.scopeType === "project" ? input.recentEventCount : null,
+      sampled_project_count: input.scopeType === "group" ? input.sampledProjects.length : null,
+      open_merge_request_count: openMergeRequests.length,
+      merge_requests_needing_attention_count: mergeRequestsNeedingAttention.length,
+      open_issue_count: openIssues.length,
+      unassigned_issue_count: unassignedIssues.length,
+      failed_pipeline_signal_count: failedPipelineSignalCount,
+      running_pipeline_signal_count: runningPipelineSignalCount,
+      projects_needing_attention_count:
+        input.scopeType === "group" ? projectsNeedingAttention.length : null
+    },
+    highlights: {
+      merge_requests: mergeRequestsNeedingAttention.slice(0, 5),
+      issues: unassignedIssues.slice(0, 5),
+      failed_pipelines: failedPipelines.slice(0, 5),
+      projects_needing_attention: projectsNeedingAttention.slice(0, 5)
     },
     content_is_untrusted: true
   };
@@ -1195,6 +1372,160 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       });
 
       return presentOutput(args.output_format, result, formatStaleMergeRequestCleanupMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_team_delivery_digest",
+    title: "Team Delivery Digest",
+    description:
+      "Generate a concise project or group delivery digest with health signals, notable blockers, and a chat-ready summary.",
+    safety: "read-only",
+    inputSchema: {
+      scope_type: z.enum(["project", "group"]),
+      scope_id: z.string().trim().min(1),
+      days: z.number().int().positive().max(90).optional().default(7),
+      project_sample_limit: z.number().int().positive().max(10).optional().default(5),
+      per_page: z.number().int().positive().max(50).optional().default(20),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject, resolveProjectId, resolveGroupId }) => {
+      const after = new Date(Date.now() - args.days * 24 * 60 * 60 * 1000).toISOString();
+
+      if (args.scope_type === "project") {
+        const projectId = resolveProjectId(args.scope_id);
+        const project = await requireProject(projectId);
+        const [eventsResponse, mergeRequestsResponse, issuesResponse, pipelinesResponse] =
+          await Promise.all([
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/events`, {
+              query: {
+                after,
+                per_page: 50
+              }
+            }),
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/merge_requests`, {
+              query: {
+                state: "opened",
+                scope: "all",
+                per_page: args.per_page
+              }
+            }),
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/issues`, {
+              query: {
+                state: "opened",
+                per_page: args.per_page
+              }
+            }),
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/pipelines`, {
+              query: {
+                updated_after: after,
+                per_page: args.per_page
+              }
+            })
+          ]);
+
+        const result = summarizeTeamDeliveryDigestAssessment({
+          scopeType: "project",
+          scope: project,
+          reportingWindowDays: args.days,
+          recentEventCount: eventsResponse.data.length,
+          openMergeRequests: mergeRequestsResponse.data,
+          openIssues: issuesResponse.data,
+          pipelineSignals: pipelinesResponse.data
+        });
+
+        return presentOutput(args.output_format, result, formatTeamDeliveryDigestMarkdown);
+      }
+
+      const groupId = resolveGroupId(args.scope_id);
+      const group = await requireAllowedGroup(groupId, deps);
+      const [mergeRequestsResponse, issuesResponse, projectsResponse] = await Promise.all([
+        client.getJson<JsonMap[]>(`/groups/${encodeURIComponent(groupId)}/merge_requests`, {
+          query: {
+            state: "opened",
+            per_page: args.per_page
+          }
+        }),
+        client.getJson<JsonMap[]>(`/groups/${encodeURIComponent(groupId)}/issues`, {
+          query: {
+            state: "opened",
+            per_page: args.per_page
+          }
+        }),
+        client.getJson<JsonMap[]>(`/groups/${encodeURIComponent(groupId)}/projects`, {
+          query: cleanQuery({
+            include_subgroups: true,
+            order_by: "last_activity_at",
+            sort: "desc",
+            per_page: args.project_sample_limit
+          })
+        })
+      ]);
+
+      const sampledProjects = await Promise.all(
+        projectsResponse.data
+          .filter((project) => project.archived !== true)
+          .slice(0, args.project_sample_limit)
+          .map(async (project) => {
+            const projectId = asNumber(project.id);
+
+            if (projectId === null) {
+              return {
+                id: project.id ?? null,
+                path_with_namespace:
+                  project.path_with_namespace ?? project.path ?? project.name_with_namespace ?? null,
+                latest_pipeline_status: null,
+                attention_reason: null
+              };
+            }
+
+            const pipelineResponse = await client.getJson<JsonMap[]>(
+              `/projects/${encodeURIComponent(String(projectId))}/pipelines`,
+              {
+                query: {
+                  per_page: 1
+                }
+              }
+            );
+            const latestPipeline = pipelineResponse.data[0] ?? null;
+            const latestPipelineStatus = asString(latestPipeline?.status);
+            let attentionReason: string | null = null;
+
+            if (latestPipelineStatus === "failed") {
+              attentionReason = "Latest sampled project pipeline is failing.";
+            } else if (
+              latestPipelineStatus !== null &&
+              activePipelineStatuses.has(normalizeStatus(latestPipelineStatus))
+            ) {
+              attentionReason = "Latest sampled project pipeline is still running.";
+            }
+
+            return {
+              id: projectId,
+              path_with_namespace:
+                project.path_with_namespace ?? project.path ?? project.name_with_namespace ?? null,
+              last_activity_at: project.last_activity_at ?? null,
+              latest_pipeline_status: latestPipelineStatus,
+              attention_reason: attentionReason
+            };
+          })
+      );
+
+      const result = summarizeTeamDeliveryDigestAssessment({
+        scopeType: "group",
+        scope: {
+          id: group.id ?? null,
+          name: group.name ?? null,
+          full_path: group.full_path ?? null,
+          web_url: group.web_url ?? null
+        },
+        reportingWindowDays: args.days,
+        openMergeRequests: mergeRequestsResponse.data,
+        openIssues: issuesResponse.data,
+        sampledProjects
+      });
+
+      return presentOutput(args.output_format, result, formatTeamDeliveryDigestMarkdown);
     }
   });
 
