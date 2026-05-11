@@ -10,6 +10,8 @@ const baseConfig: AppConfig = {
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
+  projectAliases: {},
+  groupAliases: {},
   projectAllowlist: [],
   groupAllowlist: [],
   projectDenylist: [],
@@ -61,6 +63,10 @@ describe("formatDoctorReport", () => {
           token_scopes: ["read_api", "api"]
         },
         access_controls: {
+          project_aliases_enabled: false,
+          group_aliases_enabled: false,
+          project_alias_count: 0,
+          group_alias_count: 0,
           project_allowlist_enabled: false,
           group_allowlist_enabled: false,
           project_denylist_enabled: false,

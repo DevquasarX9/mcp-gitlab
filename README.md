@@ -136,6 +136,8 @@ The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you alrea
 | `ENABLE_WRITE_TOOLS` | No | `false` | Enables write-capable tools |
 | `ENABLE_DESTRUCTIVE_TOOLS` | No | `false` | Enables destructive tools that also require per-call confirmation |
 | `ENABLE_DRY_RUN` | No | `false` | Returns intended write requests without mutating GitLab |
+| `PROJECT_ALIASES` | No | empty | Comma-separated `alias=group/project` mappings for `project_id` inputs |
+| `GROUP_ALIASES` | No | empty | Comma-separated `alias=my-group` mappings for `group_id` inputs |
 
 ### Access controls and limits
 
@@ -159,6 +161,17 @@ The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you alrea
 | `EXPOSE_SECRET_VARIABLE_VALUES` | `false` | Keeps CI/CD secret values redacted unless explicitly enabled |
 
 See [`.env.example`](https://github.com/DevquasarX9/mcp-gitlab/blob/main/.env.example) for a complete local template.
+
+### Aliases
+
+If you repeatedly work with the same projects or groups, you can define explicit aliases:
+
+```bash
+PROJECT_ALIASES=platform-api=platform/backend-api,storefront=commerce/storefront
+GROUP_ALIASES=platform=platform,commerce=commerce
+```
+
+After that, any tool expecting `project_id` or `group_id` can use the alias instead of the full path. Alias resolution is explicit and local to this server configuration.
 
 ## Token Setup
 

@@ -12,6 +12,8 @@ const testConfig: AppConfig = {
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
+  projectAliases: {},
+  groupAliases: {},
   projectAllowlist: [],
   groupAllowlist: [],
   projectDenylist: [],

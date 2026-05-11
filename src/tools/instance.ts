@@ -130,6 +130,12 @@ export function buildTokenValidationAdvisory(
     );
   }
 
+  if (Object.keys(config.projectAliases).length > 0 || Object.keys(config.groupAliases).length > 0) {
+    recommendedNextChecks.push(
+      "If you use aliases, confirm the expected canonical project and group paths before sharing example prompts with the team."
+    );
+  }
+
   if (config.enableDestructiveTools && !config.enableWriteTools) {
     warnings.push(
       "ENABLE_DESTRUCTIVE_TOOLS is enabled without ENABLE_WRITE_TOOLS, so destructive actions remain inconsistent with the broader write posture."
@@ -190,9 +196,13 @@ export function buildTokenValidationAdvisory(
       has_write_api_scope: hasWriteApiScope
     },
     access_controls: {
+      project_aliases_enabled: Object.keys(config.projectAliases).length > 0,
+      group_aliases_enabled: Object.keys(config.groupAliases).length > 0,
       project_allowlist_enabled: config.projectAllowlist.length > 0,
       group_allowlist_enabled: config.groupAllowlist.length > 0,
       project_denylist_enabled: config.projectDenylist.length > 0,
+      project_alias_count: Object.keys(config.projectAliases).length,
+      group_alias_count: Object.keys(config.groupAliases).length,
       project_allowlist_count: config.projectAllowlist.length,
       group_allowlist_count: config.groupAllowlist.length,
       project_denylist_count: config.projectDenylist.length

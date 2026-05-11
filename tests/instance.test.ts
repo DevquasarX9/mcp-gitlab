@@ -10,6 +10,8 @@ const baseConfig: AppConfig = {
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
+  projectAliases: {},
+  groupAliases: {},
   projectAllowlist: [],
   groupAllowlist: [],
   projectDenylist: [],
@@ -40,6 +42,8 @@ describe("buildTokenValidationAdvisory", () => {
         has_write_api_scope: true
       },
       access_controls: {
+        project_aliases_enabled: false,
+        group_aliases_enabled: false,
         project_allowlist_enabled: false,
         group_allowlist_enabled: false,
         project_denylist_enabled: false
@@ -62,6 +66,12 @@ describe("buildTokenValidationAdvisory", () => {
       {
         ...baseConfig,
         enableWriteTools: true,
+        projectAliases: {
+          platform: "group/project"
+        },
+        groupAliases: {
+          core: "group"
+        },
         projectAllowlist: ["group/project"],
         groupAllowlist: ["group"],
         projectDenylist: ["group/legacy"]
@@ -80,9 +90,13 @@ describe("buildTokenValidationAdvisory", () => {
         has_write_api_scope: false
       },
       access_controls: {
+        project_aliases_enabled: true,
+        group_aliases_enabled: true,
         project_allowlist_enabled: true,
         group_allowlist_enabled: true,
         project_denylist_enabled: true,
+        project_alias_count: 1,
+        group_alias_count: 1,
         project_allowlist_count: 1,
         group_allowlist_count: 1,
         project_denylist_count: 1

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { AppConfig } from "../config.js";
+import type { AliasMap, AppConfig } from "../config.js";
 import type { GitLabClient } from "../gitlab/client.js";
 import { buildUserFacingError, GuardrailError } from "../gitlab/errors.js";
 import type { JsonMap } from "../gitlab/types.js";
@@ -23,6 +23,8 @@ export interface ToolDeps {
 export interface ToolExecutionContext {
   readonly client: GitLabClient;
   readonly config: AppConfig;
+  readonly resolveProjectId: (projectId: string) => string;
+  readonly resolveGroupId: (groupId: string) => string;
   readonly requireProject: (projectId: string) => Promise<JsonMap>;
   readonly requireGroup: (groupId: string) => Promise<JsonMap>;
 }
@@ -58,15 +60,32 @@ export function registerTool<TSchema extends z.ZodRawShape>(
       }
     },
     async (args: Record<string, unknown>) => {
+      const normalizedArgs = resolveToolArgumentAliases(args, deps.config);
       const context: ToolExecutionContext = {
         client: deps.client,
         config: deps.config,
+        resolveProjectId: (projectId: string) =>
+          resolveConfiguredAlias(projectId, deps.config.projectAliases, "project"),
+        resolveGroupId: (groupId: string) =>
+          resolveConfiguredAlias(groupId, deps.config.groupAliases, "group"),
         requireProject: async (projectId: string) => {
-          const project = await getProject(deps.client, projectId);
+          const resolvedProjectId = resolveConfiguredAlias(
+            projectId,
+            deps.config.projectAliases,
+            "project"
+          );
+          const project = await getProject(deps.client, resolvedProjectId);
           assertProjectAllowed(deps.config, project);
           return project;
         },
-        requireGroup: async (groupId: string) => getGroup(deps.client, groupId)
+        requireGroup: async (groupId: string) => {
+          const resolvedGroupId = resolveConfiguredAlias(
+            groupId,
+            deps.config.groupAliases,
+            "group"
+          );
+          return getGroup(deps.client, resolvedGroupId);
+        }
       };
 
       try {
@@ -77,12 +96,12 @@ export function registerTool<TSchema extends z.ZodRawShape>(
         if (definition.safety === "destructive") {
           assertDestructiveEnabled(
             deps.config,
-            extractConfirmDestructive(args as Record<string, unknown>)
+            extractConfirmDestructive(normalizedArgs)
           );
         }
 
         const data = await definition.handler(
-          args as z.output<z.ZodObject<TSchema>>,
+          normalizedArgs as z.output<z.ZodObject<TSchema>>,
           context
         );
 
@@ -107,6 +126,60 @@ export function registerTool<TSchema extends z.ZodRawShape>(
       }
     }
   );
+}
+
+export function resolveConfiguredAlias(
+  value: string,
+  aliases: AliasMap,
+  aliasType: "project" | "group"
+): string {
+  let current = value;
+  const seen = new Set<string>();
+
+  while (Object.prototype.hasOwnProperty.call(aliases, current)) {
+    if (seen.has(current)) {
+      throw new GuardrailError(
+        `Detected a ${aliasType} alias cycle while resolving "${value}".`,
+        "ALIAS_CYCLE_DETECTED"
+      );
+    }
+
+    seen.add(current);
+    const next = aliases[current];
+
+    if (typeof next !== "string" || next.length === 0) {
+      break;
+    }
+
+    current = next;
+  }
+
+  return current;
+}
+
+export function resolveToolArgumentAliases(
+  args: Record<string, unknown>,
+  config: AppConfig
+): Record<string, unknown> {
+  const normalizedArgs = { ...args };
+
+  if (typeof normalizedArgs.project_id === "string") {
+    normalizedArgs.project_id = resolveConfiguredAlias(
+      normalizedArgs.project_id,
+      config.projectAliases,
+      "project"
+    );
+  }
+
+  if (typeof normalizedArgs.group_id === "string") {
+    normalizedArgs.group_id = resolveConfiguredAlias(
+      normalizedArgs.group_id,
+      config.groupAliases,
+      "group"
+    );
+  }
+
+  return normalizedArgs;
 }
 
 export async function getProject(client: GitLabClient, projectId: string): Promise<JsonMap> {
