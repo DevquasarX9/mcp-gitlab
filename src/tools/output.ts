@@ -316,6 +316,44 @@ export function formatCommitRangeSummaryMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatDirectorySummaryMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const signals = asMap(data.signals);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Directory Summary: ${stringValue(project.path_with_namespace ?? project.full_path ?? project.id, "unknown project")}`,
+    "",
+    `- Path: ${stringValue(data.path, "(root)")}`,
+    `- Ref: ${stringValue(data.ref)}`,
+    `- Directory profile: ${stringValue(data.directory_profile, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Total entries sampled: ${numberValue(signals.total_entry_count)}`,
+    `- Files: ${numberValue(signals.file_count)}`,
+    `- Directories: ${numberValue(signals.directory_count)}`,
+    `- Max depth sampled: ${numberValue(signals.max_depth)}`,
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Key Files",
+    ...bulletList(limitedList(asList(highlights.key_files), summarizePathEntry, 10)),
+    "",
+    "## Top Subdirectories",
+    ...bulletList(limitedList(asList(highlights.top_subdirectories), summarizeDirectoryCount, 10)),
+    "",
+    "## Top File Types",
+    ...bulletList(limitedList(asList(highlights.top_file_types), summarizeFileTypeCount, 10)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatFlakyCiTriageMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const signals = asMap(data.signals);
@@ -547,6 +585,22 @@ function summarizeDirectoryCount(entry: JsonMap): string {
   const changedFileCount = numberValue(entry.changed_file_count);
 
   return `${path}: ${changedFileCount} changed files`;
+}
+
+function summarizePathEntry(entry: JsonMap): string {
+  const path = stringValue(entry.path, "unknown");
+  const reason = typeof entry.reason === "string" && entry.reason.length > 0
+    ? ` - ${entry.reason}`
+    : "";
+
+  return `${path}${reason}`;
+}
+
+function summarizeFileTypeCount(entry: JsonMap): string {
+  const extension = stringValue(entry.extension, "unknown");
+  const fileCount = numberValue(entry.file_count);
+
+  return `${extension}: ${fileCount} files`;
 }
 
 function summarizeNotableFile(entry: JsonMap): string {

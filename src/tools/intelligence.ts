@@ -2,9 +2,10 @@ import { z } from "zod";
 
 import type { GitLabClient } from "../gitlab/client.js";
 import type { JsonMap } from "../gitlab/types.js";
-import { stripUnsafeText } from "../security/guards.js";
+import { stripUnsafeText, validateRef, validateRepositoryPath } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 import {
+  formatDirectorySummaryMarkdown,
   formatCommitRangeSummaryMarkdown,
   formatFailedPipelineMarkdown,
   formatFlakyCiTriageMarkdown,
@@ -96,6 +97,21 @@ function topLevelDirectory(path: string): string {
   return segments[0] ?? "(root)";
 }
 
+function pathDepth(path: string): number {
+  return path.replace(/^\/+|\/+$/g, "").split("/").filter((segment) => segment.length > 0).length;
+}
+
+function fileExtension(path: string): string {
+  const normalized = path.split("/").pop() ?? path;
+  const dotIndex = normalized.lastIndexOf(".");
+
+  if (dotIndex <= 0 || dotIndex === normalized.length - 1) {
+    return "(none)";
+  }
+
+  return normalized.slice(dotIndex).toLowerCase();
+}
+
 function normalizeStatus(status: unknown): string {
   return typeof status === "string" ? status.toLowerCase() : "";
 }
@@ -159,6 +175,189 @@ function classifyNotableFile(path: string): string | null {
   }
 
   return null;
+}
+
+function classifyDirectoryKeyFile(path: string): string | null {
+  const normalized = path.toLowerCase();
+
+  if (normalized.endsWith("/readme.md") || normalized === "readme.md") {
+    return "Likely human-oriented entry point or usage guide.";
+  }
+
+  if (/(^|\/)(package\.json|composer\.json|pyproject\.toml|go\.mod|cargo\.toml)$/i.test(path)) {
+    return "Dependency or project manifest.";
+  }
+
+  if (/(^|\/)(dockerfile|docker-compose\.ya?ml|makefile)$/i.test(path)) {
+    return "Build or runtime entry surface.";
+  }
+
+  if (/(^|\/)(index|main|app|server)\.(ts|tsx|js|jsx|php|py|rb|go|java|kt)$/i.test(path)) {
+    return "Likely executable or application entry file.";
+  }
+
+  if (/(^|\/)(\.env\.example|config\.(ts|js|php|json|ya?ml)|settings\.(ts|js|php|json|ya?ml))$/i.test(path)) {
+    return "Configuration entry point.";
+  }
+
+  return null;
+}
+
+export function summarizeDirectoryAssessment(input: {
+  readonly project: JsonMap;
+  readonly path: string;
+  readonly ref: string;
+  readonly recursive: boolean;
+  readonly items: readonly JsonMap[];
+}): JsonMap {
+  const files = input.items.filter((item) => asString(item.type) === "blob");
+  const directories = input.items.filter((item) => asString(item.type) === "tree");
+  const extensionCounts = new Map<string, number>();
+  const subdirectoryCounts = new Map<string, number>();
+  const keyFiles: JsonMap[] = [];
+  let maxDepth = 0;
+
+  for (const item of input.items) {
+    const path = asString(item.path);
+    if (path === null) {
+      continue;
+    }
+
+    maxDepth = Math.max(maxDepth, Math.max(0, pathDepth(path) - (input.path.length > 0 ? pathDepth(input.path) : 0)));
+
+    if (asString(item.type) === "blob") {
+      const extension = fileExtension(path);
+      extensionCounts.set(extension, (extensionCounts.get(extension) ?? 0) + 1);
+      const reason = classifyDirectoryKeyFile(path);
+      if (reason !== null) {
+        keyFiles.push({ path, reason });
+      }
+    } else if (asString(item.type) === "tree") {
+      const relativePath = input.path.length > 0 && path.startsWith(`${input.path}/`)
+        ? path.slice(input.path.length + 1)
+        : path;
+      const topSegment = relativePath.split("/").find((segment) => segment.length > 0);
+      if (topSegment) {
+        subdirectoryCounts.set(topSegment, (subdirectoryCounts.get(topSegment) ?? 0) + 1);
+      }
+    }
+  }
+
+  const topFileTypes = [...extensionCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([extension, fileCount]) => ({
+      extension,
+      file_count: fileCount
+    }));
+  const topSubdirectories = [...subdirectoryCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([path, changedFileCount]) => ({
+      path,
+      changed_file_count: changedFileCount
+    }));
+
+  const appLikeExtensions = [".ts", ".tsx", ".js", ".jsx", ".php", ".py", ".rb", ".go", ".java", ".kt", ".cs"];
+  const testLikeExtensions = [".spec.ts", ".test.ts", ".spec.js", ".test.js", ".feature"];
+  const appCodeCount = files.filter((item) => {
+    const path = asString(item.path) ?? "";
+    return appLikeExtensions.some((extension) => path.endsWith(extension));
+  }).length;
+  const testCodeCount = files.filter((item) => {
+    const path = asString(item.path) ?? "";
+    return testLikeExtensions.some((extension) => path.endsWith(extension)) || path.includes("/test") || path.includes("/spec");
+  }).length;
+  const docCount = files.filter((item) => {
+    const path = (asString(item.path) ?? "").toLowerCase();
+    return path.endsWith(".md") || path.endsWith(".rst") || path.includes("/docs/");
+  }).length;
+  const configCount = keyFiles.filter((entry) => {
+    const reason = asString(entry.reason) ?? "";
+    return reason.includes("Configuration") || reason.includes("manifest") || reason.includes("Build");
+  }).length;
+  const infraCount = files.filter((item) => {
+    const path = asString(item.path) ?? "";
+    return classifyNotableFile(path) === "Touches delivery or infrastructure surfaces." ||
+      classifyNotableFile(path) === "Touches CI or automation configuration.";
+  }).length;
+
+  let directoryProfile = "mixed";
+  if (docCount > Math.max(appCodeCount, testCodeCount, configCount, infraCount)) {
+    directoryProfile = "documentation";
+  } else if (testCodeCount > Math.max(appCodeCount, configCount, infraCount)) {
+    directoryProfile = "tests";
+  } else if (configCount > Math.max(appCodeCount, testCodeCount, infraCount)) {
+    directoryProfile = "configuration";
+  } else if (infraCount > Math.max(appCodeCount, testCodeCount, configCount)) {
+    directoryProfile = "infrastructure";
+  } else if (appCodeCount > 0) {
+    directoryProfile = "application";
+  } else if (files.length === 0 && directories.length > 0) {
+    directoryProfile = "container";
+  }
+
+  const warnings: string[] = [];
+  const nextActions: string[] = [];
+
+  if (files.length + directories.length >= 150) {
+    warnings.push("The sampled directory is large, so this summary is structural rather than exhaustive.");
+    nextActions.push("Narrow the path and rerun the summary if you need a more focused view.");
+  }
+
+  if (maxDepth >= 4) {
+    warnings.push("The sampled directory has a relatively deep nested structure.");
+    nextActions.push("Inspect the deepest subdirectories next if you are tracing ownership or code flow.");
+  }
+
+  if (keyFiles.length === 0) {
+    warnings.push("No obvious manifest, README, or entry file was detected in the sampled directory.");
+    nextActions.push("Open a representative file or list a narrower subtree to understand this area better.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Start with the detected key files, then inspect the top subdirectories.");
+  }
+
+  const summary =
+    directoryProfile === "application"
+      ? "This directory looks primarily application-oriented based on the file types and entry-file heuristics in the sampled tree."
+      : directoryProfile === "tests"
+        ? "This directory looks primarily test-oriented based on the sampled tree."
+        : directoryProfile === "configuration"
+          ? "This directory looks configuration-heavy based on manifests, config files, or build entry points."
+          : directoryProfile === "infrastructure"
+            ? "This directory looks infrastructure or delivery-oriented based on the sampled paths."
+            : directoryProfile === "documentation"
+              ? "This directory looks documentation-heavy based on the sampled files."
+              : directoryProfile === "container"
+                ? "This path currently looks like a structural container directory with nested subdirectories."
+                : "This directory has a mixed structure, so the key files and dominant file types are the best starting point.";
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace: input.project.path_with_namespace ?? null,
+      default_branch: input.project.default_branch ?? null
+    },
+    path: input.path.length > 0 ? input.path : "(root)",
+    ref: input.ref,
+    recursive: input.recursive,
+    directory_profile: directoryProfile,
+    summary,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      total_entry_count: input.items.length,
+      file_count: files.length,
+      directory_count: directories.length,
+      max_depth: maxDepth
+    },
+    highlights: {
+      key_files: keyFiles.slice(0, 10),
+      top_subdirectories: topSubdirectories.slice(0, 10),
+      top_file_types: topFileTypes.slice(0, 10)
+    },
+    content_is_untrusted: true
+  };
 }
 
 export function summarizeCommitRangeAssessment(input: {
@@ -1447,6 +1646,54 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       });
 
       return presentOutput(args.output_format, result, formatCommitRangeSummaryMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_summarize_directory",
+    title: "Summarize Directory",
+    description:
+      "Summarize a repository directory by sampling its tree structure, dominant file types, and likely entry files.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      path: z.string().trim().optional(),
+      ref: z.string().trim().optional(),
+      recursive: z.boolean().optional().default(true),
+      max_entries: z.number().int().positive().max(200).optional().default(100),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject }) => {
+      const project = await requireProject(args.project_id);
+      const safePath = args.path ? validateRepositoryPath(args.path) : "";
+      const safeRef =
+        typeof args.ref === "string" && args.ref.length > 0
+          ? validateRef(args.ref)
+          : typeof project.default_branch === "string" && project.default_branch.length > 0
+            ? project.default_branch
+            : "HEAD";
+
+      const treeResponse = await client.getJson<JsonMap[]>(
+        `/projects/${encodeURIComponent(args.project_id)}/repository/tree`,
+        {
+          query: cleanQuery({
+            path: safePath.length > 0 ? safePath : undefined,
+            ref: safeRef,
+            recursive: args.recursive,
+            per_page: args.max_entries
+          })
+        }
+      );
+
+      const result = summarizeDirectoryAssessment({
+        project,
+        path: safePath,
+        ref: safeRef,
+        recursive: args.recursive,
+        items: treeResponse.data
+      });
+
+      return presentOutput(args.output_format, result, formatDirectorySummaryMarkdown);
     }
   });
 

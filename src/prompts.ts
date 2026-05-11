@@ -533,4 +533,55 @@ export function registerPromptTools(server: McpServer): void {
       ]
     })
   );
+
+  server.registerPrompt(
+    "gitlab_summarize_directory_workflow",
+    {
+      title: "Summarize Directory Workflow",
+      description:
+        "Guide the model through understanding what a repository directory contains, which files matter most, and what kind of area it appears to be.",
+      argsSchema: {
+        project_id: z.string().trim().min(1).describe("GitLab project path or numeric ID."),
+        path: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional repository path to summarize. Omit for the repository root."),
+        ref: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional branch, tag, or commit SHA."),
+        focus: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional emphasis such as entry points, config files, tests, or operational risk.")
+      }
+    },
+    async ({ project_id, path, ref, focus }) => ({
+      description: "Directory summary workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Summarize directory "${path ?? "/"}" in project "${project_id}" at ref "${ref ?? "default branch or HEAD"}".`,
+            `Focus: ${focus ?? "directory purpose, key files, dominant file types, and the best next files to inspect"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_summarize_directory",
+            "- gitlab_list_repository_tree",
+            "- gitlab_get_file",
+            "- gitlab_search_code",
+            "",
+            "Return:",
+            "1. what kind of directory this appears to be",
+            "2. the most important files or manifests",
+            "3. the dominant file types or subdirectories",
+            "4. any structural uncertainties or risks",
+            "5. the best next files to inspect"
+          ])
+        )
+      ]
+    })
+  );
 }

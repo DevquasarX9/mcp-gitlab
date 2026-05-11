@@ -50,6 +50,7 @@ describe("workflow prompts", () => {
       "gitlab_review_merge_request_workflow",
       "gitlab_stale_merge_request_cleanup_workflow",
       "gitlab_summarize_commit_range_workflow",
+      "gitlab_summarize_directory_workflow",
       "gitlab_summarize_project_status_workflow"
       ,
       "gitlab_team_delivery_digest_workflow"
@@ -202,6 +203,41 @@ describe("workflow prompts", () => {
     expect(firstMessage.content.text).toContain("gitlab_summarize_commit_range");
     expect(firstMessage.content.text).toContain("gitlab_compare_refs");
     expect(firstMessage.content.text).toContain("risky paths");
+
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  it("registers the directory workflow prompt with repository-tree guidance", async () => {
+    const { server } = createServer(testConfig);
+    const client = new Client({
+      name: "prompt-test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const prompt = await client.getPrompt({
+      name: "gitlab_summarize_directory_workflow",
+      arguments: {
+        project_id: "group/project",
+        path: "src/services",
+        ref: "main"
+      }
+    });
+
+    expect(prompt.description).toBe("Directory summary workflow");
+    expect(prompt.messages).toHaveLength(1);
+
+    const firstMessage = prompt.messages[0];
+    if (firstMessage === undefined || firstMessage.content.type !== "text") {
+      throw new Error("Expected directory-summary prompt to return a text message.");
+    }
+
+    expect(firstMessage.content.text).toContain('Summarize directory "src/services" in project "group/project" at ref "main".');
+    expect(firstMessage.content.text).toContain("gitlab_summarize_directory");
+    expect(firstMessage.content.text).toContain("gitlab_list_repository_tree");
+    expect(firstMessage.content.text).toContain("best next files to inspect");
 
     await Promise.all([client.close(), server.close()]);
   });
