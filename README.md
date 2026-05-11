@@ -63,14 +63,34 @@ node dist/cli.js
 
 For local development, copy `.env.example` to `.env` and keep credentials out of git.
 
+Run a setup diagnostics pass before wiring the server into a client:
+
+```bash
+gitlab-mcp-server doctor
+```
+
+From source:
+
+```bash
+npm run build
+node dist/cli.js doctor
+```
+
+The doctor report validates GitLab connectivity and summarizes:
+
+- authenticated user and GitLab version
+- read-only, write-enabled, or destructive-enabled posture
+- token scope visibility when PAT introspection is available
+- allowlists, denylist, and alias counts
+- likely blocked capabilities and recommended next checks
+
 ## MCP Client Setup
 
 Example client configs live in [`examples/clients/`](https://github.com/DevquasarX9/mcp-gitlab/tree/main/examples/clients):
 
 - [Claude Code guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_code.md)
-- [Claude Desktop JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json)
-- [Codex TOML config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml)
-- [Cursor MCP JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
+- [Shared client setup guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/README.md)
+- Raw config examples: [Claude Desktop JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json), [Codex TOML](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml), [Cursor JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
 
 ### Generic stdio config
 
@@ -173,6 +193,68 @@ GROUP_ALIASES=platform=platform,commerce=commerce
 
 After that, any tool expecting `project_id` or `group_id` can use the alias instead of the full path. Alias resolution is explicit and local to this server configuration.
 
+## Guided Prompts
+
+The server now exposes reusable MCP prompts so users do not need to memorize the full tool catalog first.
+
+Core workflow prompts:
+
+- `gitlab_review_merge_request_workflow`
+- `gitlab_explain_failed_pipeline_workflow`
+- `gitlab_summarize_project_status_workflow`
+- `gitlab_generate_weekly_delivery_summary_workflow`
+- `gitlab_assess_project_write_safety_workflow`
+
+Hero workflow prompts:
+
+- `gitlab_stale_merge_request_cleanup_workflow`
+- `gitlab_flaky_ci_triage_workflow`
+- `gitlab_release_readiness_check_workflow`
+- `gitlab_team_delivery_digest_workflow`
+
+Example prompt requests inside an MCP client:
+
+```text
+Use gitlab_review_merge_request_workflow for project_id="platform-api" and merge_request_iid="42".
+```
+
+```text
+Use gitlab_flaky_ci_triage_workflow for project_id="platform-api" and ref="main".
+```
+
+These prompts point the model at the relevant `gitlab_*` tools for each workflow while keeping the actual data access explicit and structured.
+
+## Shareable Output Formats
+
+Selected higher-level tools support `output_format="markdown"` in addition to the default structured JSON response envelope.
+
+Current markdown-capable tools:
+
+- `gitlab_summarize_project_status`
+- `gitlab_explain_failed_pipeline`
+- `gitlab_review_merge_request_risks`
+- `gitlab_generate_release_notes`
+- `gitlab_get_project_dashboard`
+
+Example calls:
+
+```json
+{
+  "project_id": "platform-api",
+  "output_format": "markdown"
+}
+```
+
+```json
+{
+  "project_id": "platform-api",
+  "pipeline_id": 12345,
+  "output_format": "markdown"
+}
+```
+
+This is useful when the result is intended for chat, a GitLab comment, or a status update, while `structured` remains the best default for agents that want to post-process the result.
+
 ## Token Setup
 
 Recommended scopes:
@@ -229,15 +311,19 @@ This server is useful when you want an agent to:
 - trace a failed job back to its pipeline, commit, and merge request context
 - draft release notes from tags, compares, and recent delivery activity
 - assess whether a project is safe for AI-assisted writes before enabling write mode
+- produce a chat-ready delivery digest with markdown output
+- use guided prompts instead of manually selecting low-level tools
 
 If you want agents and other developers to discover the right tools quickly, refer to the actual MCP tool names in prompts, examples, and client instructions.
 
 ## Troubleshooting
 
+- Run `gitlab-mcp-server doctor` first when setup behavior is unclear.
 - `401 Unauthorized`: the token is invalid, expired, or using the wrong header mode.
 - `403 Forbidden`: the token lacks access or the resource is outside the configured allowlists.
 - `404 Not Found`: the resource is missing or hidden by GitLab permissions.
 - `429 Too Many Requests`: the GitLab rate limit was hit.
+- PAT about to expire: the `doctor` report and `gitlab_validate_token` advisory will flag short remaining lifetime when PAT introspection is available.
 - Large file or diff errors: raise payload limits only when you trust the workload.
 - CLI not found from source: run `npm run build` and invoke `node dist/cli.js`.
 
