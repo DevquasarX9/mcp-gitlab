@@ -45,6 +45,7 @@ describe("workflow prompts", () => {
       "gitlab_explain_failed_pipeline_workflow",
       "gitlab_flaky_ci_triage_workflow",
       "gitlab_generate_weekly_delivery_summary_workflow",
+      "gitlab_portfolio_delivery_overview_workflow",
       "gitlab_release_readiness_check_workflow",
       "gitlab_review_merge_request_workflow",
       "gitlab_stale_merge_request_cleanup_workflow",
@@ -131,6 +132,40 @@ describe("workflow prompts", () => {
     expect(firstMessage.content.text).toContain("gitlab_find_flaky_jobs");
     expect(firstMessage.content.text).toContain("gitlab_compare_pipeline_runs");
     expect(firstMessage.content.text).toContain("gitlab_trace_job_to_commit_and_merge_request");
+
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  it("registers the portfolio workflow prompt with cross-project tool guidance", async () => {
+    const { server } = createServer(testConfig);
+    const client = new Client({
+      name: "prompt-test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const prompt = await client.getPrompt({
+      name: "gitlab_portfolio_delivery_overview_workflow",
+      arguments: {
+        group_id: "group/platform",
+        project_limit: "5"
+      }
+    });
+
+    expect(prompt.description).toBe("Portfolio delivery overview workflow");
+    expect(prompt.messages).toHaveLength(1);
+
+    const firstMessage = prompt.messages[0];
+    if (firstMessage === undefined || firstMessage.content.type !== "text") {
+      throw new Error("Expected portfolio overview prompt to return a text message.");
+    }
+
+    expect(firstMessage.content.text).toContain('Assess cross-project delivery health for group "group/platform".');
+    expect(firstMessage.content.text).toContain("gitlab_portfolio_delivery_overview");
+    expect(firstMessage.content.text).toContain("gitlab_get_group_delivery_overview");
+    expect(firstMessage.content.text).toContain("chat-ready portfolio summary");
 
     await Promise.all([client.close(), server.close()]);
   });

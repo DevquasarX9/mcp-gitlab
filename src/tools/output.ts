@@ -383,6 +383,39 @@ export function formatTeamDeliveryDigestMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatPortfolioDeliveryOverviewMarkdown(data: JsonMap): string {
+  const scope = asMap(data.scope);
+  const signals = asMap(data.signals);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+  const projectSummaries = asList(data.project_summaries);
+
+  return [
+    `# Portfolio Delivery Overview: ${stringValue(data.scope_type, "scope")} ${stringValue(scope.full_path ?? scope.name ?? scope.id, "unknown scope")}`,
+    "",
+    `- Portfolio status: ${stringValue(data.portfolio_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Chat-ready summary: ${stringValue(data.chat_ready_summary, "n/a")}`,
+    `- Projects sampled: ${numberValue(signals.project_count)}`,
+    `- Projects needing attention: ${numberValue(signals.projects_needing_attention_count)}`,
+    `- Projects on watch: ${numberValue(signals.projects_on_watch_count)}`,
+    `- Failed pipeline signals: ${numberValue(signals.failed_pipeline_signal_count)}`,
+    `- Blocked merge requests: ${numberValue(signals.blocked_merge_request_count)}`,
+    `- Stale merge requests: ${numberValue(signals.stale_merge_request_count)}`,
+    `- Unassigned issues: ${numberValue(signals.unassigned_issue_count)}`,
+    "",
+    "## Top Risk Projects",
+    ...bulletList(limitedList(asList(highlights.top_risk_projects), summarizePortfolioProject, 5)),
+    "",
+    "## Project Summaries",
+    ...bulletList(limitedList(projectSummaries, summarizePortfolioProject, 8)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
@@ -449,4 +482,19 @@ function summarizeAttentionProject(project: JsonMap): string {
   const attentionReason = stringValue(project.attention_reason, "Needs attention");
 
   return `${path} (${latestPipelineStatus}) - ${attentionReason}`;
+}
+
+function summarizePortfolioProject(project: JsonMap): string {
+  const projectInfo = asMap(project.project);
+  const path = stringValue(
+    projectInfo.path_with_namespace ?? projectInfo.full_path ?? projectInfo.name ?? projectInfo.id,
+    "unknown project"
+  );
+  const deliveryStatus = stringValue(project.delivery_status, "unknown");
+  const latestPipelineStatus = stringValue(project.latest_pipeline_status, "unknown");
+  const reasons = asList(project.attention_reasons)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const leadReason = reasons[0] ?? "No highlighted issues in the current sample.";
+
+  return `${path} [${deliveryStatus}] (${latestPipelineStatus}) - ${leadReason}`;
 }

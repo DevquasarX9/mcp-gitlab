@@ -438,4 +438,52 @@ export function registerPromptTools(server: McpServer): void {
       ]
     })
   );
+
+  server.registerPrompt(
+    "gitlab_portfolio_delivery_overview_workflow",
+    {
+      title: "Portfolio Delivery Overview Workflow",
+      description:
+        "Guide the model through assessing cross-project delivery health for a GitLab group and identifying the top delivery risk hotspots.",
+      argsSchema: {
+        group_id: z.string().trim().min(1).describe("GitLab group path or numeric ID."),
+        project_limit: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional number of sampled projects, for example 5 or 10."),
+        focus: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional emphasis such as pipelines, review queues, or release risk.")
+      }
+    },
+    async ({ group_id, project_limit, focus }) => ({
+      description: "Portfolio delivery overview workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Assess cross-project delivery health for group "${group_id}".`,
+            `Sampled project limit: ${project_limit ?? "5"}.`,
+            `Focus: ${focus ?? "overall delivery health, pipeline breakage, stale review queues, and project hotspots"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_portfolio_delivery_overview",
+            "- gitlab_get_group_delivery_overview",
+            "- gitlab_team_delivery_digest",
+            "- gitlab_list_group_merge_requests",
+            "- gitlab_list_group_issues",
+            "",
+            "Return:",
+            "1. the overall portfolio health status",
+            "2. which projects look riskiest right now",
+            "3. the main pipeline, review, or ownership hotspots",
+            "4. the shortest useful follow-up plan",
+            "5. a concise chat-ready portfolio summary"
+          ])
+        )
+      ]
+    })
+  );
 }

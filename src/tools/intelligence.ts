@@ -7,6 +7,7 @@ import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 import {
   formatFailedPipelineMarkdown,
   formatFlakyCiTriageMarkdown,
+  formatPortfolioDeliveryOverviewMarkdown,
   formatMergeRequestRiskMarkdown,
   formatReleaseReadinessMarkdown,
   formatProjectStatusMarkdown,
@@ -629,6 +630,215 @@ export function summarizeTeamDeliveryDigestAssessment(
       issues: unassignedIssues.slice(0, 5),
       failed_pipelines: failedPipelines.slice(0, 5),
       projects_needing_attention: projectsNeedingAttention.slice(0, 5)
+    },
+    content_is_untrusted: true
+  };
+}
+
+export function summarizePortfolioProjectAssessment(input: {
+  readonly project: JsonMap;
+  readonly staleAfterDays: number;
+  readonly openMergeRequests: readonly JsonMap[];
+  readonly openIssues: readonly JsonMap[];
+  readonly pipelineSignals: readonly JsonMap[];
+}): JsonMap {
+  const staleMergeRequests = input.openMergeRequests.filter((mergeRequest) => {
+    const age = daysOld(mergeRequest.updated_at);
+    return age !== null && age >= input.staleAfterDays;
+  });
+  const blockedMergeRequests = input.openMergeRequests.filter((mergeRequest) =>
+    isBlockedMergeStatus(mergeRequest.detailed_merge_status)
+  );
+  const unassignedIssues = input.openIssues.filter(
+    (issue) => takeArray<JsonMap>(issue.assignees).length === 0
+  );
+  const failedPipelines = input.pipelineSignals.filter(
+    (pipeline) => normalizeStatus(pipeline.status) === "failed"
+  );
+  const runningPipelines = input.pipelineSignals.filter((pipeline) =>
+    activePipelineStatuses.has(normalizeStatus(pipeline.status))
+  );
+  const attentionReasons: string[] = [];
+
+  if (input.project.archived === true) {
+    attentionReasons.push("Project is archived.");
+  }
+
+  if (failedPipelines.length > 0) {
+    attentionReasons.push("Recent pipeline sample includes failures.");
+  }
+
+  if (blockedMergeRequests.length > 0) {
+    attentionReasons.push("Open merge request sample includes blocked items.");
+  }
+
+  if (staleMergeRequests.length > 0) {
+    attentionReasons.push("Open merge request sample includes stale items.");
+  }
+
+  if (unassignedIssues.length > 0) {
+    attentionReasons.push("Open issue sample includes unassigned issues.");
+  }
+
+  const deliveryStatus =
+    input.project.archived === true
+      ? "archived"
+      : attentionReasons.length > 0
+        ? "needs_attention"
+        : runningPipelines.length > 0
+          ? "watch"
+          : "healthy";
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace:
+        input.project.path_with_namespace ?? input.project.full_path ?? null,
+      default_branch: input.project.default_branch ?? null,
+      archived: input.project.archived ?? false
+    },
+    delivery_status: deliveryStatus,
+    latest_pipeline_status: asString(input.pipelineSignals[0]?.status),
+    attention_score:
+      input.project.archived === true
+        ? 0
+        : failedPipelines.length * 4 +
+          blockedMergeRequests.length * 3 +
+          staleMergeRequests.length * 2 +
+          unassignedIssues.length +
+          runningPipelines.length,
+    counts: {
+      open_merge_requests: input.openMergeRequests.length,
+      blocked_merge_requests: blockedMergeRequests.length,
+      stale_merge_requests: staleMergeRequests.length,
+      open_issues: input.openIssues.length,
+      unassigned_issues: unassignedIssues.length,
+      failed_pipelines: failedPipelines.length,
+      running_pipelines: runningPipelines.length
+    },
+    attention_reasons: attentionReasons,
+    highlights: {
+      blocked_merge_requests: blockedMergeRequests.slice(0, 3),
+      stale_merge_requests: staleMergeRequests.slice(0, 3),
+      unassigned_issues: unassignedIssues.slice(0, 3),
+      failed_pipelines: failedPipelines.slice(0, 3)
+    }
+  };
+}
+
+export function summarizePortfolioDeliveryOverviewAssessment(input: {
+  readonly scopeType: "group" | "projects";
+  readonly scope: JsonMap;
+  readonly staleAfterDays: number;
+  readonly projectSummaries: readonly JsonMap[];
+}): JsonMap {
+  const projectSummaries = [...input.projectSummaries].sort((left, right) => {
+    const scoreDelta = (asNumber(right.attention_score) ?? 0) - (asNumber(left.attention_score) ?? 0);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+
+    const leftPath = asString((left.project as JsonMap | undefined)?.path_with_namespace) ?? "";
+    const rightPath = asString((right.project as JsonMap | undefined)?.path_with_namespace) ?? "";
+    return leftPath.localeCompare(rightPath);
+  });
+  const activeProjectSummaries = projectSummaries.filter(
+    (project) => asString(project.delivery_status) !== "archived"
+  );
+  const projectsNeedingAttention = activeProjectSummaries.filter(
+    (project) => asString(project.delivery_status) === "needs_attention"
+  );
+  const projectsOnWatch = activeProjectSummaries.filter(
+    (project) => asString(project.delivery_status) === "watch"
+  );
+  const failedPipelineSignalCount = activeProjectSummaries.reduce(
+    (sum, project) => sum + (asNumber((project.counts as JsonMap | undefined)?.failed_pipelines) ?? 0),
+    0
+  );
+  const blockedMergeRequestCount = activeProjectSummaries.reduce(
+    (sum, project) => sum + (asNumber((project.counts as JsonMap | undefined)?.blocked_merge_requests) ?? 0),
+    0
+  );
+  const staleMergeRequestCount = activeProjectSummaries.reduce(
+    (sum, project) => sum + (asNumber((project.counts as JsonMap | undefined)?.stale_merge_requests) ?? 0),
+    0
+  );
+  const unassignedIssueCount = activeProjectSummaries.reduce(
+    (sum, project) => sum + (asNumber((project.counts as JsonMap | undefined)?.unassigned_issues) ?? 0),
+    0
+  );
+  const nextActions: string[] = [];
+
+  if (projectsNeedingAttention.length > 0) {
+    nextActions.push("Start with the highest-risk projects in the portfolio before broad status reporting.");
+  }
+
+  if (failedPipelineSignalCount > 0) {
+    nextActions.push("Restore the failing project pipelines that are driving portfolio risk.");
+  }
+
+  if (blockedMergeRequestCount > 0) {
+    nextActions.push("Resolve blocked merge requests in the highlighted projects so delivery flow can resume.");
+  }
+
+  if (unassignedIssueCount > 0) {
+    nextActions.push("Assign or explicitly defer unowned issues across the highlighted projects.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Share the portfolio summary and keep monitoring the sampled projects.");
+  }
+
+  const portfolioStatus =
+    projectsNeedingAttention.length > 0
+      ? "needs_attention"
+      : projectsOnWatch.length > 0
+        ? "watch"
+        : "healthy";
+  const scopeLabel =
+    input.scopeType === "group"
+      ? asString(input.scope.full_path) ?? asString(input.scope.name) ?? "group"
+      : asString(input.scope.name) ?? "selected projects";
+  const summary =
+    portfolioStatus === "needs_attention"
+      ? "The sampled portfolio includes projects with concrete delivery risks that should be addressed before this is treated as a clean group status."
+      : portfolioStatus === "watch"
+        ? "The sampled portfolio looks mostly healthy, but some projects still have active signals worth watching."
+        : "The sampled portfolio looks healthy in the current delivery snapshot.";
+  const chatReadySummary =
+    `${scopeLabel}: ${activeProjectSummaries.length} projects sampled, ${projectsNeedingAttention.length} needing attention, ${projectsOnWatch.length} on watch, ${failedPipelineSignalCount} failed pipeline signals, ${blockedMergeRequestCount} blocked MRs, ${staleMergeRequestCount} stale MRs, ${unassignedIssueCount} unassigned issues.`;
+
+  return {
+    scope_type: input.scopeType,
+    scope:
+      input.scopeType === "group"
+        ? {
+            id: input.scope.id ?? null,
+            name: input.scope.name ?? null,
+            full_path: input.scope.full_path ?? null,
+            web_url: input.scope.web_url ?? null
+          }
+        : {
+            name: input.scope.name ?? "selected projects",
+            project_ids: input.scope.project_ids ?? []
+          },
+    stale_after_days: input.staleAfterDays,
+    portfolio_status: portfolioStatus,
+    summary,
+    chat_ready_summary: chatReadySummary,
+    next_actions: nextActions,
+    signals: {
+      project_count: activeProjectSummaries.length,
+      projects_needing_attention_count: projectsNeedingAttention.length,
+      projects_on_watch_count: projectsOnWatch.length,
+      failed_pipeline_signal_count: failedPipelineSignalCount,
+      blocked_merge_request_count: blockedMergeRequestCount,
+      stale_merge_request_count: staleMergeRequestCount,
+      unassigned_issue_count: unassignedIssueCount
+    },
+    project_summaries: projectSummaries,
+    highlights: {
+      top_risk_projects: projectSummaries.filter((project) => (asNumber(project.attention_score) ?? 0) > 0).slice(0, 5)
     },
     content_is_untrusted: true
   };
@@ -1526,6 +1736,117 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       });
 
       return presentOutput(args.output_format, result, formatTeamDeliveryDigestMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_portfolio_delivery_overview",
+    title: "Portfolio Delivery Overview",
+    description:
+      "Summarize delivery health across a group or an explicit set of projects and highlight the top risk hotspots.",
+    safety: "read-only",
+    inputSchema: {
+      scope_type: z.enum(["group", "projects"]),
+      scope_id: z.string().trim().optional(),
+      project_ids: z.array(z.string().trim().min(1)).optional(),
+      project_limit: z.number().int().positive().max(15).optional().default(5),
+      per_page: z.number().int().positive().max(50).optional().default(20),
+      pipeline_limit: z.number().int().positive().max(10).optional().default(5),
+      stale_after_days: z.number().int().positive().max(90).optional().default(14),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject, resolveProjectId, resolveGroupId }) => {
+      let scope: JsonMap;
+      let selectedProjectIds: readonly string[];
+
+      if (args.scope_type === "group") {
+        if (typeof args.scope_id !== "string" || args.scope_id.length === 0) {
+          throw new Error("scope_id is required when scope_type is \"group\".");
+        }
+
+        const groupId = resolveGroupId(args.scope_id);
+        const group = await requireAllowedGroup(groupId, deps);
+        const projectsResponse = await client.getJson<JsonMap[]>(
+          `/groups/${encodeURIComponent(groupId)}/projects`,
+          {
+            query: cleanQuery({
+              include_subgroups: true,
+              order_by: "last_activity_at",
+              sort: "desc",
+              per_page: args.project_limit
+            })
+          }
+        );
+
+        selectedProjectIds = [
+          ...new Set(
+            projectsResponse.data
+              .filter((project) => project.archived !== true)
+              .map((project) => asNumber(project.id))
+              .filter((projectId): projectId is number => projectId !== null)
+              .map((projectId) => String(projectId))
+          )
+        ];
+        scope = {
+          id: group.id ?? null,
+          name: group.name ?? null,
+          full_path: group.full_path ?? null,
+          web_url: group.web_url ?? null
+        };
+      } else {
+        if (!Array.isArray(args.project_ids) || args.project_ids.length === 0) {
+          throw new Error("project_ids is required when scope_type is \"projects\".");
+        }
+
+        selectedProjectIds = [...new Set(args.project_ids.map((projectId) => resolveProjectId(projectId)))];
+        scope = {
+          name: "selected projects",
+          project_ids: selectedProjectIds
+        };
+      }
+
+      const projectSummaries = await Promise.all(
+        selectedProjectIds.map(async (projectId) => {
+          const project = await requireProject(projectId);
+          const [mergeRequestsResponse, issuesResponse, pipelinesResponse] = await Promise.all([
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/merge_requests`, {
+              query: {
+                state: "opened",
+                scope: "all",
+                per_page: args.per_page
+              }
+            }),
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/issues`, {
+              query: {
+                state: "opened",
+                per_page: args.per_page
+              }
+            }),
+            client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(projectId)}/pipelines`, {
+              query: {
+                per_page: args.pipeline_limit
+              }
+            })
+          ]);
+
+          return summarizePortfolioProjectAssessment({
+            project,
+            staleAfterDays: args.stale_after_days,
+            openMergeRequests: mergeRequestsResponse.data,
+            openIssues: issuesResponse.data,
+            pipelineSignals: pipelinesResponse.data
+          });
+        })
+      );
+
+      const result = summarizePortfolioDeliveryOverviewAssessment({
+        scopeType: args.scope_type,
+        scope,
+        staleAfterDays: args.stale_after_days,
+        projectSummaries
+      });
+
+      return presentOutput(args.output_format, result, formatPortfolioDeliveryOverviewMarkdown);
     }
   });
 
