@@ -1,4 +1,5 @@
 import { buildUserFacingError } from "../gitlab/errors.js";
+import { isToolPresentation } from "../tools/output.js";
 
 export type ToolEnvelope<T> = Record<string, unknown> & {
   readonly ok: boolean;
@@ -8,14 +9,18 @@ export type ToolEnvelope<T> = Record<string, unknown> & {
 };
 
 export function toolSuccess<T>(data: T, warnings: readonly string[] = []) {
+  const unwrappedData = isToolPresentation(data) ? data.data : data;
   const payload: ToolEnvelope<T> = {
     ok: true,
-    data,
+    data: unwrappedData as T,
     warnings
   };
 
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
+    content: [{
+      type: "text" as const,
+      text: isToolPresentation(data) ? data.contentText : JSON.stringify(payload, null, 2)
+    }],
     structuredContent: payload
   };
 }

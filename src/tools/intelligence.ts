@@ -4,6 +4,14 @@ import type { GitLabClient } from "../gitlab/client.js";
 import type { JsonMap } from "../gitlab/types.js";
 import { stripUnsafeText } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
+import {
+  formatFailedPipelineMarkdown,
+  formatMergeRequestRiskMarkdown,
+  formatProjectStatusMarkdown,
+  formatReleaseNotesMarkdown,
+  outputFormatSchema,
+  presentOutput
+} from "./output.js";
 
 export const blockedStatuses = new Set([
   "approvals_syncing",
@@ -96,7 +104,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       "Summarize current project health by combining project metadata, recent pipelines, open issues, and open merge requests.",
     safety: "read-only",
     inputSchema: {
-      project_id: z.string().trim().min(1)
+      project_id: z.string().trim().min(1),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       const project = await requireProject(args.project_id);
@@ -118,7 +127,7 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
         return age !== null && age >= 14;
       });
 
-      return {
+      const result = {
         project: {
           id: project.id,
           path_with_namespace: project.path_with_namespace,
@@ -134,6 +143,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
           unassigned_issues: issues.data.filter((issue) => takeArray(issue.assignees).length === 0).slice(0, 5)
         }
       };
+
+      return presentOutput(args.output_format, result, formatProjectStatusMarkdown);
     }
   });
 
@@ -250,7 +261,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       project_id: z.string().trim().min(1),
       pipeline_id: z.number().int().positive(),
       trace_tail_lines: z.number().int().positive().max(200).optional().default(40),
-      max_jobs: z.number().int().positive().max(10).optional().default(3)
+      max_jobs: z.number().int().positive().max(10).optional().default(3),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       await requireProject(args.project_id);
@@ -277,12 +289,14 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
         })
       );
 
-      return {
+      const result = {
         pipeline: pipeline.data,
         failed_job_count: failedJobs.length,
         failed_jobs: traceSamples,
         content_is_untrusted: true
       };
+
+      return presentOutput(args.output_format, result, formatFailedPipelineMarkdown);
     }
   });
 
@@ -294,7 +308,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
     safety: "read-only",
     inputSchema: {
       project_id: z.string().trim().min(1),
-      merge_request_iid: z.number().int().positive()
+      merge_request_iid: z.number().int().positive(),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       await requireProject(args.project_id);
@@ -358,7 +373,7 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
         risks.push(`There are ${unresolvedDiscussions.length} unresolved discussion threads.`);
       }
 
-      return {
+      const result = {
         merge_request: mr,
         changed_file_count: diffs.length,
         latest_pipeline: latestPipeline ?? null,
@@ -367,6 +382,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
         risk_level:
           risks.length >= 4 ? "high" : risks.length >= 2 ? "medium" : risks.length === 1 ? "low" : "minimal"
       };
+
+      return presentOutput(args.output_format, result, formatMergeRequestRiskMarkdown);
     }
   });
 
@@ -380,7 +397,8 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       project_id: z.string().trim().min(1),
       from_ref: z.string().trim().optional(),
       to_ref: z.string().trim().optional(),
-      limit_commits: z.number().int().positive().max(200).optional().default(100)
+      limit_commits: z.number().int().positive().max(200).optional().default(100),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       const project = await requireProject(args.project_id);
@@ -418,13 +436,15 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
         })
       };
 
-      return {
+      const result = {
         from_ref: inferredFromRef ?? null,
         to_ref: inferredToRef,
         commit_count: commits.length,
         categories,
         content_is_untrusted: true
       };
+
+      return presentOutput(args.output_format, result, formatReleaseNotesMarkdown);
     }
   });
 

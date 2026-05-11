@@ -12,6 +12,11 @@ import {
   type GraphQLDashboardPipeline,
   takeNodes
 } from "./deliveryShared.js";
+import {
+  formatProjectDashboardMarkdown,
+  outputFormatSchema,
+  presentOutput
+} from "./output.js";
 import { registerTool, type ToolDeps } from "./shared.js";
 
 interface GraphQLProjectDashboard {
@@ -316,7 +321,8 @@ export function registerProjectDashboardTools(deps: ToolDeps): void {
       merge_request_limit: z.number().int().positive().max(20).optional().default(5),
       issue_limit: z.number().int().positive().max(20).optional().default(5),
       pipeline_limit: z.number().int().positive().max(20).optional().default(5),
-      assignee_limit: z.number().int().positive().max(10).optional().default(3)
+      assignee_limit: z.number().int().positive().max(10).optional().default(3),
+      output_format: outputFormatSchema
     },
     handler: async (args, { requireProject }) => {
       const project = await requireProject(args.project_id);
@@ -360,10 +366,12 @@ export function registerProjectDashboardTools(deps: ToolDeps): void {
         throw new Error("GitLab could not find the requested project.");
       }
 
-      return {
+      const result = {
         source: "graphql",
         ...summarizeProjectDashboard(resultProject)
       };
+
+      return presentOutput(args.output_format, result, formatProjectDashboardMarkdown);
     }
   });
 }
