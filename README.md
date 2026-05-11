@@ -224,6 +224,59 @@ Use gitlab_flaky_ci_triage_workflow for project_id="platform-api" and ref="main"
 
 These prompts point the model at the relevant `gitlab_*` tools for each workflow while keeping the actual data access explicit and structured.
 
+## Recommended Starting Points
+
+If you are trying the MCP for the first time, start with the orchestration tools rather than the lower-level primitives.
+
+Recommended first tools:
+
+- `gitlab_release_readiness_check`: one-call release go/caution/hold assessment for a project
+- `gitlab_flaky_ci_triage`: separates likely flaky CI from deterministic failures
+- `gitlab_stale_merge_request_cleanup`: identifies stale merge requests and recommends the next action for each sampled item
+- `gitlab_team_delivery_digest`: produces a concise project or group delivery summary plus a chat-ready status line
+
+Example calls:
+
+```json
+{
+  "project_id": "platform-api",
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_release_readiness_check`.
+
+```json
+{
+  "project_id": "platform-api",
+  "ref": "main",
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_flaky_ci_triage`.
+
+```json
+{
+  "project_id": "platform-api",
+  "stale_after_days": 14,
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_stale_merge_request_cleanup`.
+
+```json
+{
+  "scope_type": "group",
+  "scope_id": "platform",
+  "days": 7,
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_team_delivery_digest`.
+
 ## Shareable Output Formats
 
 Selected higher-level tools support `output_format="markdown"` in addition to the default structured JSON response envelope.
@@ -253,6 +306,15 @@ Example calls:
 {
   "project_id": "platform-api",
   "pipeline_id": 12345,
+  "output_format": "markdown"
+}
+```
+
+```json
+{
+  "scope_type": "project",
+  "scope_id": "platform-api",
+  "days": 7,
   "output_format": "markdown"
 }
 ```
@@ -311,7 +373,10 @@ This server is useful when you want an agent to:
 
 - inspect a GitLab repository without cloning it first
 - review merge request diffs, discussions, approvals, and pipeline state together
-- summarize recent team activity across issues, merge requests, and pipelines
+- summarize recent team activity across issues, merge requests, and pipelines with `gitlab_team_delivery_digest`
+- assess release readiness with `gitlab_release_readiness_check`
+- triage flaky CI with `gitlab_flaky_ci_triage`
+- clean up stale merge requests with `gitlab_stale_merge_request_cleanup`
 - trace a failed job back to its pipeline, commit, and merge request context
 - draft release notes from tags, compares, and recent delivery activity
 - assess whether a project is safe for AI-assisted writes before enabling write mode
