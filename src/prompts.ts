@@ -364,6 +364,7 @@ export function registerPromptTools(server: McpServer): void {
             `Release goal: ${release_goal ?? "general release readiness"}.`,
             "",
             "Use these tools as needed:",
+            "- gitlab_release_readiness_check",
             "- gitlab_get_project_dashboard",
             "- gitlab_summarize_project_status",
             "- gitlab_find_failed_pipelines",

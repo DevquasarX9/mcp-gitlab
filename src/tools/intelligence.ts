@@ -7,6 +7,7 @@ import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 import {
   formatFailedPipelineMarkdown,
   formatMergeRequestRiskMarkdown,
+  formatReleaseReadinessMarkdown,
   formatProjectStatusMarkdown,
   formatReleaseNotesMarkdown,
   outputFormatSchema,
@@ -63,6 +64,157 @@ function summarizePipelineStatus(pipelines: readonly JsonMap[]): Record<string, 
   }
 
   return counts;
+}
+
+function normalizeStatus(status: unknown): string {
+  return typeof status === "string" ? status.toLowerCase() : "";
+}
+
+const activePipelineStatuses = new Set([
+  "created",
+  "manual",
+  "pending",
+  "preparing",
+  "running",
+  "scheduled",
+  "waiting_for_resource"
+]);
+
+export function categorizeReleaseCommits(commits: readonly JsonMap[]): {
+  readonly features: readonly JsonMap[];
+  readonly fixes: readonly JsonMap[];
+  readonly chores: readonly JsonMap[];
+  readonly other: readonly JsonMap[];
+} {
+  return {
+    features: commits.filter((commit) => String(commit.title ?? "").startsWith("feat")),
+    fixes: commits.filter((commit) => String(commit.title ?? "").startsWith("fix")),
+    chores: commits.filter((commit) => String(commit.title ?? "").startsWith("chore")),
+    other: commits.filter((commit) => {
+      const title = String(commit.title ?? "");
+      return !title.startsWith("feat") && !title.startsWith("fix") && !title.startsWith("chore");
+    })
+  };
+}
+
+export function summarizeReleaseReadinessAssessment(input: {
+  readonly project: JsonMap;
+  readonly targetRef: string;
+  readonly latestPipeline: JsonMap | null;
+  readonly failedPipelines: readonly JsonMap[];
+  readonly openMergeRequests: readonly JsonMap[];
+  readonly staleMergeRequests: readonly JsonMap[];
+  readonly blockedMergeRequests: readonly JsonMap[];
+  readonly unassignedIssues: readonly JsonMap[];
+  readonly compareFromRef: string | null;
+  readonly compareCommitCount: number;
+  readonly releaseCategories: {
+    readonly features: readonly JsonMap[];
+    readonly fixes: readonly JsonMap[];
+    readonly chores: readonly JsonMap[];
+    readonly other: readonly JsonMap[];
+  };
+}): JsonMap {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const nextActions: string[] = [];
+  const latestPipelineStatus = normalizeStatus(input.latestPipeline?.status);
+
+  if (input.failedPipelines.length > 0) {
+    blockers.push(`Recent failed pipelines detected on ${input.targetRef}.`);
+    nextActions.push("Investigate the recent failed pipelines on the target ref before releasing.");
+  }
+
+  if (input.blockedMergeRequests.length > 0) {
+    blockers.push(`There are ${input.blockedMergeRequests.length} blocked open merge requests targeting the release path.`);
+    nextActions.push("Resolve or remove blocked merge requests that would affect the release path.");
+  }
+
+  if (latestPipelineStatus.length === 0) {
+    warnings.push("No recent pipeline was found for the target ref.");
+    nextActions.push("Confirm that the release ref has a recent validated pipeline.");
+  } else if (activePipelineStatuses.has(latestPipelineStatus)) {
+    warnings.push(`Latest pipeline on ${input.targetRef} is still ${latestPipelineStatus}.`);
+    nextActions.push("Wait for the latest pipeline to finish before making the final release decision.");
+  } else if (latestPipelineStatus !== "success") {
+    blockers.push(`Latest pipeline on ${input.targetRef} is ${latestPipelineStatus}.`);
+    nextActions.push("Restore the latest pipeline on the target ref to a successful state.");
+  }
+
+  if (input.staleMergeRequests.length > 0) {
+    warnings.push(`There are ${input.staleMergeRequests.length} stale open merge requests.`);
+    nextActions.push("Triage stale merge requests so release scope and ownership are clear.");
+  }
+
+  if (input.unassignedIssues.length > 0) {
+    warnings.push(`There are ${input.unassignedIssues.length} unassigned open issues.`);
+    nextActions.push("Assign or explicitly defer unassigned open issues that may affect the release.");
+  }
+
+  if (input.compareFromRef === null) {
+    warnings.push("No previous release tag or explicit from_ref was available for release-note comparison.");
+    nextActions.push("Confirm the intended release baseline before announcing or tagging the release.");
+  }
+
+  if (input.compareCommitCount >= 50) {
+    warnings.push(`The release compare includes ${input.compareCommitCount} commits, which is a relatively large batch.`);
+    nextActions.push("Review the release scope carefully because the change batch is large.");
+  }
+
+  if (input.openMergeRequests.length >= 10) {
+    warnings.push(`There are ${input.openMergeRequests.length} open merge requests in scope, which may indicate active churn.`);
+    nextActions.push("Confirm that active merge requests are intentionally excluded or included in the release plan.");
+  }
+
+  const readinessStatus =
+    blockers.length > 0 ? "hold" : warnings.length > 0 ? "caution" : "go";
+  const summary =
+    readinessStatus === "hold"
+      ? "Release readiness is blocked by pipeline or merge-state issues that should be resolved first."
+      : readinessStatus === "caution"
+        ? "Release readiness looks plausible, but there are unresolved warnings that should be reviewed before proceeding."
+        : "Release readiness looks good based on the current sampled project, pipeline, and issue signals.";
+
+  if (nextActions.length === 0) {
+    nextActions.push("Proceed with final release validation and stakeholder communication.");
+  }
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace: input.project.path_with_namespace ?? null,
+      default_branch: input.project.default_branch ?? null
+    },
+    target_ref: input.targetRef,
+    readiness_status: readinessStatus,
+    summary,
+    blockers,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      latest_pipeline_status: latestPipelineStatus.length > 0 ? latestPipelineStatus : null,
+      failed_pipeline_sample_count: input.failedPipelines.length,
+      blocked_merge_request_sample_count: input.blockedMergeRequests.length,
+      stale_merge_request_sample_count: input.staleMergeRequests.length,
+      unassigned_issue_sample_count: input.unassignedIssues.length,
+      open_merge_request_sample_count: input.openMergeRequests.length,
+      release_note_commit_count: input.compareCommitCount,
+      compare_from_ref: input.compareFromRef,
+      release_note_category_counts: {
+        features: input.releaseCategories.features.length,
+        fixes: input.releaseCategories.fixes.length,
+        chores: input.releaseCategories.chores.length,
+        other: input.releaseCategories.other.length
+      }
+    },
+    highlights: {
+      failed_pipelines: input.failedPipelines.slice(0, 5),
+      blocked_merge_requests: input.blockedMergeRequests.slice(0, 5),
+      stale_merge_requests: input.staleMergeRequests.slice(0, 5),
+      unassigned_issues: input.unassignedIssues.slice(0, 5)
+    },
+    content_is_untrusted: true
+  };
 }
 
 async function getFailedJobs(
@@ -426,15 +578,7 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       );
 
       const commits = takeArray<JsonMap>(compareResponse.data.commits).slice(0, args.limit_commits);
-      const categories = {
-        features: commits.filter((commit) => String(commit.title ?? "").startsWith("feat")),
-        fixes: commits.filter((commit) => String(commit.title ?? "").startsWith("fix")),
-        chores: commits.filter((commit) => String(commit.title ?? "").startsWith("chore")),
-        other: commits.filter((commit) => {
-          const title = String(commit.title ?? "");
-          return !title.startsWith("feat") && !title.startsWith("fix") && !title.startsWith("chore");
-        })
-      };
+      const categories = categorizeReleaseCommits(commits);
 
       const result = {
         from_ref: inferredFromRef ?? null,
@@ -445,6 +589,104 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       };
 
       return presentOutput(args.output_format, result, formatReleaseNotesMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_release_readiness_check",
+    title: "Release Readiness Check",
+    description:
+      "Assess whether a project looks ready for release by combining pipeline, merge request, issue, and release comparison signals.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      target_ref: z.string().trim().optional(),
+      stale_after_days: z.number().int().positive().max(90).optional().default(14),
+      limit_commits: z.number().int().positive().max(200).optional().default(100),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject }) => {
+      const project = await requireProject(args.project_id);
+      const targetRef = typeof args.target_ref === "string" && args.target_ref.length > 0
+        ? args.target_ref
+        : typeof project.default_branch === "string" && project.default_branch.length > 0
+          ? project.default_branch
+          : "HEAD";
+
+      const [recentPipelinesResponse, failedPipelinesResponse, mergeRequestsResponse, unassignedIssuesResponse, releasesResponse] =
+        await Promise.all([
+          client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(args.project_id)}/pipelines`, {
+            query: { ref: targetRef, per_page: 10 }
+          }),
+          client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(args.project_id)}/pipelines`, {
+            query: { ref: targetRef, status: "failed", per_page: 10 }
+          }),
+          client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(args.project_id)}/merge_requests`, {
+            query: {
+              state: "opened",
+              scope: "all",
+              target_branch: targetRef,
+              per_page: 50
+            }
+          }),
+          client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(args.project_id)}/issues`, {
+            query: {
+              state: "opened",
+              assignee_id: "None",
+              per_page: 20
+            }
+          }),
+          client.getJson<JsonMap[]>(`/projects/${encodeURIComponent(args.project_id)}/releases`, {
+            query: { per_page: 2 }
+          })
+        ]);
+
+      const openMergeRequests = mergeRequestsResponse.data;
+      const staleMergeRequests = openMergeRequests.filter((mr) => {
+        const age = daysOld(mr.updated_at);
+        return age !== null && age >= args.stale_after_days;
+      });
+      const blockedMergeRequests = openMergeRequests.filter((mr) =>
+        isBlockedMergeStatus(mr.detailed_merge_status)
+      );
+
+      const compareFromRef =
+        typeof releasesResponse.data[0]?.tag_name === "string" ? releasesResponse.data[0].tag_name : null;
+
+      let compareCommitCount = 0;
+      let releaseCategories = categorizeReleaseCommits([]);
+
+      if (compareFromRef !== null) {
+        const compareResponse = await client.getJson<JsonMap>(
+          `/projects/${encodeURIComponent(args.project_id)}/repository/compare`,
+          {
+            query: cleanQuery({
+              from: compareFromRef,
+              to: targetRef
+            })
+          }
+        );
+
+        const commits = takeArray<JsonMap>(compareResponse.data.commits).slice(0, args.limit_commits);
+        compareCommitCount = commits.length;
+        releaseCategories = categorizeReleaseCommits(commits);
+      }
+
+      const result = summarizeReleaseReadinessAssessment({
+        project,
+        targetRef,
+        latestPipeline: recentPipelinesResponse.data[0] ?? null,
+        failedPipelines: failedPipelinesResponse.data,
+        openMergeRequests,
+        staleMergeRequests,
+        blockedMergeRequests,
+        unassignedIssues: unassignedIssuesResponse.data,
+        compareFromRef,
+        compareCommitCount,
+        releaseCategories
+      });
+
+      return presentOutput(args.output_format, result, formatReleaseReadinessMarkdown);
     }
   });
 

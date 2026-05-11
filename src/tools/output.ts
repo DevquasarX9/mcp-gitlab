@@ -218,6 +218,49 @@ export function formatReleaseNotesMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatReleaseReadinessMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const signals = asMap(data.signals);
+  const blockers = asList(data.blockers)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Release Readiness: ${stringValue(project.path_with_namespace ?? project.full_path ?? project.id, "unknown project")}`,
+    "",
+    `- Target ref: ${stringValue(data.target_ref)}`,
+    `- Readiness status: ${stringValue(data.readiness_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Latest pipeline status: ${stringValue(signals.latest_pipeline_status, "unknown")}`,
+    `- Failed pipeline sample count: ${numberValue(signals.failed_pipeline_sample_count)}`,
+    `- Blocked merge request sample count: ${numberValue(signals.blocked_merge_request_sample_count)}`,
+    `- Unassigned issue sample count: ${numberValue(signals.unassigned_issue_sample_count)}`,
+    `- Release compare commit count: ${numberValue(signals.release_note_commit_count)}`,
+    "",
+    "## Blockers",
+    ...bulletList(blockers),
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions),
+    "",
+    "## Highlighted Blocked Merge Requests",
+    ...bulletList(limitedList(asList(highlights.blocked_merge_requests), summarizeMergeRequest, 5)),
+    "",
+    "## Highlighted Failed Pipelines",
+    ...bulletList(limitedList(asList(highlights.failed_pipelines), summarizePipeline, 5)),
+    "",
+    "## Highlighted Unassigned Issues",
+    ...bulletList(limitedList(asList(highlights.unassigned_issues), summarizeIssue, 5))
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
