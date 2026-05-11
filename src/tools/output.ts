@@ -261,6 +261,46 @@ export function formatReleaseReadinessMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatFlakyCiTriageMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const signals = asMap(data.signals);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+  const comparison = asMap(data.representative_pipeline_comparison);
+
+  const comparisonCounts = asMap(comparison.comparison);
+
+  return [
+    `# Flaky CI Triage: ${stringValue(project.path_with_namespace ?? project.full_path ?? project.id, "unknown project")}`,
+    "",
+    `- Ref: ${stringValue(data.ref)}`,
+    `- Triage status: ${stringValue(data.triage_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Lookback pipelines: ${numberValue(signals.lookback_pipeline_count)}`,
+    `- Failed pipeline sample count: ${numberValue(signals.failed_pipeline_sample_count)}`,
+    `- Likely flaky jobs: ${numberValue(signals.likely_flaky_job_count)}`,
+    `- Jobs with commit/MR context: ${numberValue(signals.jobs_with_context_count)}`,
+    "",
+    "## Likely Flaky Jobs",
+    ...bulletList(limitedList(asList(highlights.likely_flaky_jobs), summarizeFlakyJob, 5)),
+    "",
+    "## Representative Failed Pipelines",
+    ...bulletList(limitedList(asList(highlights.failed_pipelines), summarizePipeline, 5)),
+    "",
+    "## Pipeline Comparison",
+    ...bulletList([
+      `status changes: ${numberValue(comparisonCounts.status_change_count)}`,
+      `added jobs: ${numberValue(comparisonCounts.added_job_count)}`,
+      `removed jobs: ${numberValue(comparisonCounts.removed_job_count)}`,
+      `duration changes: ${numberValue(comparisonCounts.duration_change_count)}`
+    ]),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
@@ -297,4 +337,13 @@ export function formatProjectDashboardMarkdown(data: JsonMap): string {
     "## Highlighted Unassigned Issues",
     ...bulletList(limitedList(asList(highlights.unassigned_issues), summarizeIssue, 5))
   ].join("\n");
+}
+
+function summarizeFlakyJob(job: JsonMap): string {
+  const name = stringValue(job.name, "unnamed job");
+  const failureRate = typeof job.failure_rate === "number"
+    ? `${Math.round(job.failure_rate * 100)}%`
+    : "n/a";
+
+  return `${name} (samples: ${numberValue(job.sample_count)}, failures: ${numberValue(job.failure_count)}, failure rate: ${failureRate})`;
 }

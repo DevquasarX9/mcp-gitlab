@@ -232,6 +232,7 @@ Current markdown-capable tools:
 
 - `gitlab_summarize_project_status`
 - `gitlab_explain_failed_pipeline`
+- `gitlab_flaky_ci_triage`
 - `gitlab_release_readiness_check`
 - `gitlab_review_merge_request_risks`
 - `gitlab_generate_release_notes`
@@ -293,7 +294,7 @@ The server exposes concrete `gitlab_*` MCP tools. Representative examples:
 - Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
 - Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
 - Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`
-- Intelligence: `gitlab_summarize_project_status`, `gitlab_release_readiness_check`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
+- Intelligence: `gitlab_summarize_project_status`, `gitlab_flaky_ci_triage`, `gitlab_release_readiness_check`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
 
 Write-capable tools stay unavailable until you explicitly enable them.
 

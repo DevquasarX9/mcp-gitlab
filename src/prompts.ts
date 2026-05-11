@@ -315,6 +315,7 @@ export function registerPromptTools(server: McpServer): void {
             `Investigation window: ${investigation_window ?? "recent pipeline history"}.`,
             "",
             "Use these tools as needed:",
+            "- gitlab_flaky_ci_triage",
             "- gitlab_find_failed_pipelines",
             "- gitlab_find_flaky_jobs",
             "- gitlab_compare_pipeline_runs",

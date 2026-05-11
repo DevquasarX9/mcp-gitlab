@@ -6,6 +6,7 @@ import { stripUnsafeText } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 import {
   formatFailedPipelineMarkdown,
+  formatFlakyCiTriageMarkdown,
   formatMergeRequestRiskMarkdown,
   formatReleaseReadinessMarkdown,
   formatProjectStatusMarkdown,
@@ -13,6 +14,7 @@ import {
   outputFormatSchema,
   presentOutput
 } from "./output.js";
+import { comparePipelineJobSets, detectFlakyJobs } from "./pipelines.js";
 
 export const blockedStatuses = new Set([
   "approvals_syncing",
@@ -68,6 +70,14 @@ function summarizePipelineStatus(pipelines: readonly JsonMap[]): Record<string, 
 
 function normalizeStatus(status: unknown): string {
   return typeof status === "string" ? status.toLowerCase() : "";
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 const activePipelineStatuses = new Set([
@@ -213,6 +223,103 @@ export function summarizeReleaseReadinessAssessment(input: {
       stale_merge_requests: input.staleMergeRequests.slice(0, 5),
       unassigned_issues: input.unassignedIssues.slice(0, 5)
     },
+    content_is_untrusted: true
+  };
+}
+
+interface FlakyJobContext {
+  readonly job: JsonMap;
+  readonly trace_job_result: JsonMap | null;
+}
+
+export function summarizeFlakyCiTriageAssessment(input: {
+  readonly project: JsonMap;
+  readonly ref: string | null;
+  readonly lookbackPipelineCount: number;
+  readonly failedPipelines: readonly JsonMap[];
+  readonly flakyJobs: readonly JsonMap[];
+  readonly representativePipelineComparison: JsonMap | null;
+  readonly flakyJobContexts: readonly FlakyJobContext[];
+}): JsonMap {
+  const nextActions: string[] = [];
+  const warnings: string[] = [];
+
+  const triageStatus =
+    input.flakyJobs.length > 0
+      ? "flaky_detected"
+      : input.failedPipelines.length > 0
+        ? "deterministic_failures_only"
+        : input.lookbackPipelineCount < 3
+          ? "insufficient_data"
+          : "stable_or_no_signal";
+
+  const summary =
+    triageStatus === "flaky_detected"
+      ? "Recent pipeline history shows jobs that oscillate between success and failure, which is a strong flaky CI signal."
+      : triageStatus === "deterministic_failures_only"
+        ? "There are failed pipelines, but the sampled job history does not show strong flaky-job oscillation yet."
+        : triageStatus === "insufficient_data"
+          ? "There is not enough recent pipeline history to make a strong flaky CI judgment."
+          : "The sampled recent pipeline history does not show a strong flaky CI signal.";
+
+  if (input.lookbackPipelineCount < 3) {
+    warnings.push("Recent pipeline history is shallow, so the flaky-job signal is weak.");
+    nextActions.push("Collect more pipeline history before making a strong flaky-versus-deterministic call.");
+  }
+
+  if (input.flakyJobs.length > 0) {
+    nextActions.push("Triage the top oscillating jobs first and compare their last successful and failed runs.");
+  }
+
+  if (input.failedPipelines.length > 0) {
+    nextActions.push("Review the most recent failed pipelines to confirm whether the failures cluster around the same jobs.");
+  }
+
+  if (input.representativePipelineComparison !== null) {
+    nextActions.push("Use the representative pipeline comparison to isolate which jobs changed behavior between a passing and failing run.");
+  }
+
+  if (input.flakyJobContexts.length > 0) {
+    nextActions.push("Check the commit and merge request context for the strongest flaky candidates before escalating to owners.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Continue monitoring CI history and rerun this triage when more pipeline samples exist.");
+  }
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace: input.project.path_with_namespace ?? null,
+      default_branch: input.project.default_branch ?? null
+    },
+    ref: input.ref,
+    triage_status: triageStatus,
+    summary,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      lookback_pipeline_count: input.lookbackPipelineCount,
+      failed_pipeline_sample_count: input.failedPipelines.length,
+      likely_flaky_job_count: input.flakyJobs.length,
+      jobs_with_context_count: input.flakyJobContexts.length
+    },
+    highlights: {
+      likely_flaky_jobs: input.flakyJobs.slice(0, 5),
+      failed_pipelines: input.failedPipelines.slice(0, 5),
+      flaky_job_contexts: input.flakyJobContexts.slice(0, 3)
+    },
+    representative_pipeline_comparison:
+      input.representativePipelineComparison ?? {
+        left_pipeline: null,
+        right_pipeline: null,
+        comparison: {
+          added_job_count: 0,
+          removed_job_count: 0,
+          status_change_count: 0,
+          duration_change_count: 0
+        }
+      },
     content_is_untrusted: true
   };
 }
@@ -687,6 +794,156 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       });
 
       return presentOutput(args.output_format, result, formatReleaseReadinessMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_flaky_ci_triage",
+    title: "Flaky CI Triage",
+    description:
+      "Assess whether recent CI failures look flaky by combining pipeline history, job oscillation, representative comparisons, and commit/MR context.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      ref: z.string().trim().optional(),
+      lookback_pipelines: z.number().int().positive().max(25).optional().default(12),
+      min_samples: z.number().int().positive().max(20).optional().default(3),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject }) => {
+      const project = await requireProject(args.project_id);
+
+      const pipelinesResponse = await client.getJson<JsonMap[]>(
+        `/projects/${encodeURIComponent(args.project_id)}/pipelines`,
+        {
+          query: cleanQuery({
+            ref: args.ref,
+            per_page: args.lookback_pipelines
+          })
+        }
+      );
+
+      const pipelines = pipelinesResponse.data;
+      const jobsByPipeline = await Promise.all(
+        pipelines.map(async (pipeline) => {
+          const pipelineId = asNumber(pipeline.id);
+          if (pipelineId === null) {
+            return {
+              pipeline,
+              jobs: [] as readonly JsonMap[]
+            };
+          }
+
+          const response = await client.getJson<JsonMap[]>(
+            `/projects/${encodeURIComponent(args.project_id)}/pipelines/${pipelineId}/jobs`,
+            {
+              query: {
+                include_retried: false,
+                per_page: 100
+              }
+            }
+          );
+
+          return {
+            pipeline,
+            jobs: response.data.map((job) => ({
+              ...job,
+              pipeline_id: pipelineId,
+              pipeline_status: pipeline.status,
+              pipeline_ref: pipeline.ref
+            }))
+          };
+        })
+      );
+
+      const allJobRuns = jobsByPipeline.flatMap((entry) => entry.jobs);
+      const flakyJobs = detectFlakyJobs(allJobRuns, args.min_samples);
+      const failedPipelines = pipelines.filter((pipeline) => normalizeStatus(pipeline.status) === "failed");
+      const latestFailedPipeline = failedPipelines[0] ?? null;
+      const latestSuccessfulPipeline =
+        pipelines.find((pipeline) => normalizeStatus(pipeline.status) === "success") ?? null;
+
+      let representativePipelineComparison: JsonMap | null = null;
+
+      if (latestFailedPipeline && latestSuccessfulPipeline) {
+        const leftPipelineId = asNumber(latestSuccessfulPipeline.id);
+        const rightPipelineId = asNumber(latestFailedPipeline.id);
+
+        if (leftPipelineId !== null && rightPipelineId !== null) {
+          const leftJobs = jobsByPipeline.find((entry) => asNumber(entry.pipeline.id) === leftPipelineId)?.jobs ?? [];
+          const rightJobs = jobsByPipeline.find((entry) => asNumber(entry.pipeline.id) === rightPipelineId)?.jobs ?? [];
+          const comparison = comparePipelineJobSets(leftJobs, rightJobs);
+
+          representativePipelineComparison = {
+            left_pipeline: latestSuccessfulPipeline,
+            right_pipeline: latestFailedPipeline,
+            comparison: {
+              ...comparison,
+              added_job_count: takeArray(comparison.added_jobs).length,
+              removed_job_count: takeArray(comparison.removed_jobs).length,
+              status_change_count: takeArray(comparison.status_changes).length,
+              duration_change_count: takeArray(comparison.duration_changes).length
+            }
+          };
+        }
+      }
+
+      const flakyJobContexts = await Promise.all(
+        flakyJobs.slice(0, 3).map(async (job) => {
+          const recentRuns = takeArray<JsonMap>(job.recent_runs);
+          const representativeRun =
+            [...recentRuns].reverse().find((run) => normalizeStatus(run.status) === "failed") ??
+            recentRuns[recentRuns.length - 1] ??
+            null;
+          const jobId = representativeRun ? asNumber(representativeRun.id) : null;
+
+          if (jobId === null) {
+            return {
+              job,
+              trace_job_result: null
+            };
+          }
+
+          const jobResponse = await client.getJson<JsonMap>(
+            `/projects/${encodeURIComponent(args.project_id)}/jobs/${jobId}`
+          );
+          const tracedJob = jobResponse.data;
+          const commit = (tracedJob.commit as JsonMap | undefined) ?? null;
+          const commitSha = commit ? asString(commit.id) : null;
+
+          const mergeRequests = commitSha === null
+            ? []
+            : await client
+                .getJson<JsonMap[]>(
+                  `/projects/${encodeURIComponent(args.project_id)}/repository/commits/${encodeURIComponent(commitSha)}/merge_requests`,
+                  {
+                    query: { state: "all" }
+                  }
+                )
+                .then((response) => response.data);
+
+          return {
+            job,
+            trace_job_result: {
+              job: tracedJob,
+              commit,
+              merge_requests: mergeRequests
+            }
+          };
+        })
+      );
+
+      const result = summarizeFlakyCiTriageAssessment({
+        project,
+        ref: args.ref ?? (typeof project.default_branch === "string" ? project.default_branch : null),
+        lookbackPipelineCount: pipelines.length,
+        failedPipelines,
+        flakyJobs,
+        representativePipelineComparison,
+        flakyJobContexts
+      });
+
+      return presentOutput(args.output_format, result, formatFlakyCiTriageMarkdown);
     }
   });
 
