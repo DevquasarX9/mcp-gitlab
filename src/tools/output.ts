@@ -273,6 +273,49 @@ export function formatReleaseReadinessMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatCommitRangeSummaryMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const signals = asMap(data.signals);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Commit Range Summary: ${stringValue(project.path_with_namespace ?? project.full_path ?? project.id, "unknown project")}`,
+    "",
+    `- From ref: ${stringValue(data.from_ref)}`,
+    `- To ref: ${stringValue(data.to_ref)}`,
+    `- Change risk: ${stringValue(data.change_risk, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Commit count: ${numberValue(signals.commit_count)}`,
+    `- Changed files: ${numberValue(signals.changed_file_count)}`,
+    `- Changed directories: ${numberValue(signals.changed_directory_count)}`,
+    `- Features: ${numberValue(signals.feature_commit_count)}`,
+    `- Fixes: ${numberValue(signals.fix_commit_count)}`,
+    `- Chores: ${numberValue(signals.chore_commit_count)}`,
+    `- CI/config touches: ${numberValue(signals.ci_touch_count)}`,
+    `- Dependency touches: ${numberValue(signals.dependency_touch_count)}`,
+    `- Data-model touches: ${numberValue(signals.data_model_touch_count)}`,
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Top Directories",
+    ...bulletList(limitedList(asList(highlights.top_directories), summarizeDirectoryCount, 8)),
+    "",
+    "## Notable Files",
+    ...bulletList(limitedList(asList(highlights.notable_files), summarizeNotableFile, 8)),
+    "",
+    "## Sampled Commits",
+    ...bulletList(limitedList(asList(highlights.sampled_commits), summarizeCommit, 8)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatFlakyCiTriageMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const signals = asMap(data.signals);
@@ -497,4 +540,18 @@ function summarizePortfolioProject(project: JsonMap): string {
   const leadReason = reasons[0] ?? "No highlighted issues in the current sample.";
 
   return `${path} [${deliveryStatus}] (${latestPipelineStatus}) - ${leadReason}`;
+}
+
+function summarizeDirectoryCount(entry: JsonMap): string {
+  const path = stringValue(entry.path, "unknown");
+  const changedFileCount = numberValue(entry.changed_file_count);
+
+  return `${path}: ${changedFileCount} changed files`;
+}
+
+function summarizeNotableFile(entry: JsonMap): string {
+  const path = stringValue(entry.path, "unknown");
+  const reason = stringValue(entry.reason, "Needs review");
+
+  return `${path} - ${reason}`;
 }

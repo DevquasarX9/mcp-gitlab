@@ -49,6 +49,7 @@ describe("workflow prompts", () => {
       "gitlab_release_readiness_check_workflow",
       "gitlab_review_merge_request_workflow",
       "gitlab_stale_merge_request_cleanup_workflow",
+      "gitlab_summarize_commit_range_workflow",
       "gitlab_summarize_project_status_workflow"
       ,
       "gitlab_team_delivery_digest_workflow"
@@ -166,6 +167,41 @@ describe("workflow prompts", () => {
     expect(firstMessage.content.text).toContain("gitlab_portfolio_delivery_overview");
     expect(firstMessage.content.text).toContain("gitlab_get_group_delivery_overview");
     expect(firstMessage.content.text).toContain("chat-ready portfolio summary");
+
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  it("registers the commit-range workflow prompt with repository-intelligence guidance", async () => {
+    const { server } = createServer(testConfig);
+    const client = new Client({
+      name: "prompt-test-client",
+      version: "1.0.0"
+    });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const prompt = await client.getPrompt({
+      name: "gitlab_summarize_commit_range_workflow",
+      arguments: {
+        project_id: "group/project",
+        from_ref: "v1.2.0",
+        to_ref: "main"
+      }
+    });
+
+    expect(prompt.description).toBe("Commit range summary workflow");
+    expect(prompt.messages).toHaveLength(1);
+
+    const firstMessage = prompt.messages[0];
+    if (firstMessage === undefined || firstMessage.content.type !== "text") {
+      throw new Error("Expected commit-range prompt to return a text message.");
+    }
+
+    expect(firstMessage.content.text).toContain('Summarize what changed in project "group/project" from "v1.2.0" to "main".');
+    expect(firstMessage.content.text).toContain("gitlab_summarize_commit_range");
+    expect(firstMessage.content.text).toContain("gitlab_compare_refs");
+    expect(firstMessage.content.text).toContain("risky paths");
 
     await Promise.all([client.close(), server.close()]);
   });

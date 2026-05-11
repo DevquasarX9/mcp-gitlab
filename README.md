@@ -212,6 +212,7 @@ Hero workflow prompts:
 - `gitlab_release_readiness_check_workflow`
 - `gitlab_team_delivery_digest_workflow`
 - `gitlab_portfolio_delivery_overview_workflow`
+- `gitlab_summarize_commit_range_workflow`
 
 Example prompt requests inside an MCP client:
 
@@ -291,6 +292,7 @@ Current markdown-capable tools:
 - `gitlab_release_readiness_check`
 - `gitlab_team_delivery_digest`
 - `gitlab_portfolio_delivery_overview`
+- `gitlab_summarize_commit_range`
 - `gitlab_review_merge_request_risks`
 - `gitlab_generate_release_notes`
 - `gitlab_get_project_dashboard`
@@ -360,7 +362,7 @@ The server exposes concrete `gitlab_*` MCP tools. Representative examples:
 - Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
 - Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
 - Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`
-- Intelligence: `gitlab_summarize_project_status`, `gitlab_stale_merge_request_cleanup`, `gitlab_flaky_ci_triage`, `gitlab_release_readiness_check`, `gitlab_team_delivery_digest`, `gitlab_portfolio_delivery_overview`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
+- Intelligence: `gitlab_summarize_project_status`, `gitlab_stale_merge_request_cleanup`, `gitlab_flaky_ci_triage`, `gitlab_release_readiness_check`, `gitlab_team_delivery_digest`, `gitlab_portfolio_delivery_overview`, `gitlab_summarize_commit_range`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
 
 Write-capable tools stay unavailable until you explicitly enable them.
 
@@ -374,6 +376,7 @@ For design notes and implementation details, see:
 This server is useful when you want an agent to:
 
 - inspect a GitLab repository without cloning it first
+- summarize a commit range and identify risky files or directories with `gitlab_summarize_commit_range`
 - review merge request diffs, discussions, approvals, and pipeline state together
 - summarize recent team activity across issues, merge requests, and pipelines with `gitlab_team_delivery_digest`
 - assess cross-project portfolio health with `gitlab_portfolio_delivery_overview`

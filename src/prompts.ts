@@ -486,4 +486,51 @@ export function registerPromptTools(server: McpServer): void {
       ]
     })
   );
+
+  server.registerPrompt(
+    "gitlab_summarize_commit_range_workflow",
+    {
+      title: "Summarize Commit Range Workflow",
+      description:
+        "Guide the model through understanding what changed between two refs and which repository areas or operational surfaces deserve extra review.",
+      argsSchema: {
+        project_id: z.string().trim().min(1).describe("GitLab project path or numeric ID."),
+        from_ref: z.string().trim().min(1).describe("Starting branch, tag, or commit SHA."),
+        to_ref: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional target branch, tag, or commit SHA."),
+        focus: z
+          .string()
+          .trim()
+          .optional()
+          .describe("Optional emphasis such as risky files, deployment impact, or architecture changes.")
+      }
+    },
+    async ({ project_id, from_ref, to_ref, focus }) => ({
+      description: "Commit range summary workflow",
+      messages: [
+        userMessage(
+          lines([
+            `Summarize what changed in project "${project_id}" from "${from_ref}" to "${to_ref ?? "default branch or HEAD"}".`,
+            `Focus: ${focus ?? "main change themes, affected directories, risky paths, and the shortest useful review plan"}.`,
+            "",
+            "Use these tools as needed:",
+            "- gitlab_summarize_commit_range",
+            "- gitlab_compare_refs",
+            "- gitlab_generate_release_notes",
+            "- gitlab_get_commit_diff",
+            "",
+            "Return:",
+            "1. the main themes of the change range",
+            "2. which directories or files changed the most",
+            "3. which paths look operationally risky",
+            "4. what reviewers should inspect first",
+            "5. a concise shareable summary"
+          ])
+        )
+      ]
+    })
+  );
 }

@@ -5,6 +5,7 @@ import type { JsonMap } from "../gitlab/types.js";
 import { stripUnsafeText } from "../security/guards.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 import {
+  formatCommitRangeSummaryMarkdown,
   formatFailedPipelineMarkdown,
   formatFlakyCiTriageMarkdown,
   formatPortfolioDeliveryOverviewMarkdown,
@@ -80,6 +81,21 @@ function summarizePipelineStatus(pipelines: readonly JsonMap[]): Record<string, 
   return counts;
 }
 
+function representativePath(diff: JsonMap): string | null {
+  return asString(diff.new_path) ?? asString(diff.old_path);
+}
+
+function topLevelDirectory(path: string): string {
+  const normalized = path.replace(/^\/+/, "");
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+
+  if (segments.length <= 1) {
+    return "(root)";
+  }
+
+  return segments[0] ?? "(root)";
+}
+
 function normalizeStatus(status: unknown): string {
   return typeof status === "string" ? status.toLowerCase() : "";
 }
@@ -116,6 +132,171 @@ export function categorizeReleaseCommits(commits: readonly JsonMap[]): {
       const title = String(commit.title ?? "");
       return !title.startsWith("feat") && !title.startsWith("fix") && !title.startsWith("chore");
     })
+  };
+}
+
+function classifyNotableFile(path: string): string | null {
+  if (path.includes(".gitlab-ci") || path.startsWith(".github/") || path.startsWith(".gitlab/")) {
+    return "Touches CI or automation configuration.";
+  }
+
+  if (
+    /(^|\/)(Dockerfile|docker-compose|helm\/|k8s\/|terraform\/|infra\/|deployment\/|deploy\/)/i.test(path)
+  ) {
+    return "Touches delivery or infrastructure surfaces.";
+  }
+
+  if (/(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|composer\.(json|lock)|Gemfile\.lock|go\.(mod|sum)|Cargo\.(toml|lock))/i.test(path)) {
+    return "Touches dependency definitions or lockfiles.";
+  }
+
+  if (/(^|\/)(db\/|migrations\/|schema\/|prisma\/|sequelize\/)/i.test(path)) {
+    return "Touches schema or migration code.";
+  }
+
+  if (/(^|\/)(auth|security|permissions|secrets?)/i.test(path)) {
+    return "Touches authentication, authorization, or security-sensitive code.";
+  }
+
+  return null;
+}
+
+export function summarizeCommitRangeAssessment(input: {
+  readonly project: JsonMap;
+  readonly fromRef: string;
+  readonly toRef: string;
+  readonly commits: readonly JsonMap[];
+  readonly diffs: readonly JsonMap[];
+  readonly categories: {
+    readonly features: readonly JsonMap[];
+    readonly fixes: readonly JsonMap[];
+    readonly chores: readonly JsonMap[];
+    readonly other: readonly JsonMap[];
+  };
+}): JsonMap {
+  const directoryCounts = new Map<string, number>();
+  const notableFiles: JsonMap[] = [];
+  let newFileCount = 0;
+  let deletedFileCount = 0;
+  let renamedFileCount = 0;
+  let ciTouchCount = 0;
+  let dependencyTouchCount = 0;
+  let dataModelTouchCount = 0;
+
+  for (const diff of input.diffs) {
+    const path = representativePath(diff);
+    if (path === null) {
+      continue;
+    }
+
+    directoryCounts.set(topLevelDirectory(path), (directoryCounts.get(topLevelDirectory(path)) ?? 0) + 1);
+
+    if (diff.new_file === true) {
+      newFileCount += 1;
+    }
+
+    if (diff.deleted_file === true) {
+      deletedFileCount += 1;
+    }
+
+    if (diff.renamed_file === true) {
+      renamedFileCount += 1;
+    }
+
+    const reason = classifyNotableFile(path);
+    if (reason !== null) {
+      notableFiles.push({ path, reason });
+    }
+
+    if (reason === "Touches CI or automation configuration.") {
+      ciTouchCount += 1;
+    } else if (reason === "Touches dependency definitions or lockfiles.") {
+      dependencyTouchCount += 1;
+    } else if (reason === "Touches schema or migration code.") {
+      dataModelTouchCount += 1;
+    }
+  }
+
+  const topDirectories = [...directoryCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([path, changedFileCount]) => ({
+      path,
+      changed_file_count: changedFileCount
+    }));
+  const warnings: string[] = [];
+  const nextActions: string[] = [];
+
+  if (input.diffs.length >= 40) {
+    warnings.push(`This range touches ${input.diffs.length} files, which is a relatively broad change set.`);
+    nextActions.push("Review the highest-churn directories first because the change set is broad.");
+  }
+
+  if (topDirectories.length >= 6) {
+    warnings.push(`This range spans ${topDirectories.length} top-level directories, which suggests wide surface-area impact.`);
+    nextActions.push("Confirm rollout and ownership across the directories touched by this range.");
+  }
+
+  if (ciTouchCount > 0) {
+    warnings.push(`CI or automation files were touched in ${ciTouchCount} changed paths.`);
+    nextActions.push("Double-check CI and automation changes before relying on the range summary alone.");
+  }
+
+  if (dependencyTouchCount > 0) {
+    warnings.push(`Dependency definitions or lockfiles were touched in ${dependencyTouchCount} changed paths.`);
+    nextActions.push("Review dependency updates for runtime, build, or supply-chain implications.");
+  }
+
+  if (dataModelTouchCount > 0) {
+    warnings.push(`Schema or migration-related files were touched in ${dataModelTouchCount} changed paths.`);
+    nextActions.push("Validate migration and data-shape changes before release or rollout.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Review the top changed directories and sampled commits for correctness and rollout context.");
+  }
+
+  const changeRisk =
+    warnings.length >= 3 ? "elevated" : warnings.length > 0 ? "watch" : "routine";
+  const summary =
+    changeRisk === "elevated"
+      ? "This commit range touches several operationally sensitive or broad areas and should be reviewed carefully."
+      : changeRisk === "watch"
+        ? "This commit range looks understandable, but it includes some paths or breadth that deserve extra review."
+        : "This commit range looks relatively focused based on the sampled files, directories, and commit themes.";
+
+  return {
+    project: {
+      id: input.project.id ?? null,
+      path_with_namespace: input.project.path_with_namespace ?? null,
+      default_branch: input.project.default_branch ?? null
+    },
+    from_ref: input.fromRef,
+    to_ref: input.toRef,
+    change_risk: changeRisk,
+    summary,
+    warnings,
+    next_actions: nextActions,
+    signals: {
+      commit_count: input.commits.length,
+      changed_file_count: input.diffs.length,
+      changed_directory_count: topDirectories.length,
+      feature_commit_count: input.categories.features.length,
+      fix_commit_count: input.categories.fixes.length,
+      chore_commit_count: input.categories.chores.length,
+      other_commit_count: input.categories.other.length,
+      new_file_count: newFileCount,
+      deleted_file_count: deletedFileCount,
+      renamed_file_count: renamedFileCount,
+      ci_touch_count: ciTouchCount,
+      dependency_touch_count: dependencyTouchCount,
+      data_model_touch_count: dataModelTouchCount
+    },
+    highlights: {
+      top_directories: topDirectories.slice(0, 8),
+      notable_files: notableFiles.slice(0, 8),
+      sampled_commits: input.commits.slice(0, 8)
+    },
+    content_is_untrusted: true
   };
 }
 
@@ -1216,6 +1397,56 @@ export function registerIntelligenceTools(deps: ToolDeps): void {
       };
 
       return presentOutput(args.output_format, result, formatReleaseNotesMarkdown);
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_summarize_commit_range",
+    title: "Summarize Commit Range",
+    description:
+      "Summarize what changed between two refs, highlight the most-affected directories, and flag risky repository surfaces.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      from_ref: z.string().trim().min(1),
+      to_ref: z.string().trim().optional(),
+      straight: z.boolean().optional(),
+      max_commits: z.number().int().positive().max(200).optional().default(100),
+      output_format: outputFormatSchema
+    },
+    handler: async (args, { client, requireProject }) => {
+      const project = await requireProject(args.project_id);
+      const toRef =
+        typeof args.to_ref === "string" && args.to_ref.length > 0
+          ? args.to_ref
+          : typeof project.default_branch === "string" && project.default_branch.length > 0
+            ? project.default_branch
+            : "HEAD";
+
+      const compareResponse = await client.getJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/repository/compare`,
+        {
+          query: cleanQuery({
+            from: args.from_ref,
+            to: toRef,
+            straight: args.straight
+          })
+        }
+      );
+
+      const commits = takeArray<JsonMap>(compareResponse.data.commits).slice(0, args.max_commits);
+      const diffs = takeArray<JsonMap>(compareResponse.data.diffs);
+      const categories = categorizeReleaseCommits(commits);
+      const result = summarizeCommitRangeAssessment({
+        project,
+        fromRef: args.from_ref,
+        toRef,
+        commits,
+        diffs,
+        categories
+      });
+
+      return presentOutput(args.output_format, result, formatCommitRangeSummaryMarkdown);
     }
   });
 
