@@ -13,6 +13,7 @@ import { registerIntelligenceTools } from "./tools/intelligence.js";
 import { registerIssueTools } from "./tools/issues.js";
 import { registerMergeRequestTools } from "./tools/mergeRequests.js";
 import { registerPipelineTools } from "./tools/pipelines.js";
+import { registerPromptTools } from "./prompts.js";
 import { registerProjectTools } from "./tools/projects.js";
 import { registerProjectDashboardTools } from "./tools/projectDashboard.js";
 import { registerReleaseTools } from "./tools/releases.js";
@@ -35,6 +36,7 @@ export function createServer(config: AppConfig = loadConfig()): {
   const client = new GitLabClient(config);
   const deps = { server, client, config };
 
+  registerPromptTools(server);
   registerInstanceTools(deps);
   registerProjectTools(deps);
   registerProjectDashboardTools(deps);

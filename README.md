@@ -63,14 +63,34 @@ node dist/cli.js
 
 For local development, copy `.env.example` to `.env` and keep credentials out of git.
 
+Run a setup diagnostics pass before wiring the server into a client:
+
+```bash
+gitlab-mcp-server doctor
+```
+
+From source:
+
+```bash
+npm run build
+node dist/cli.js doctor
+```
+
+The doctor report validates GitLab connectivity and summarizes:
+
+- authenticated user and GitLab version
+- read-only, write-enabled, or destructive-enabled posture
+- token scope visibility when PAT introspection is available
+- allowlists, denylist, and alias counts
+- likely blocked capabilities and recommended next checks
+
 ## MCP Client Setup
 
 Example client configs live in [`examples/clients/`](https://github.com/DevquasarX9/mcp-gitlab/tree/main/examples/clients):
 
 - [Claude Code guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_code.md)
-- [Claude Desktop JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json)
-- [Codex TOML config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml)
-- [Cursor MCP JSON config](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
+- [Shared client setup guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/README.md)
+- Raw config examples: [Claude Desktop JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json), [Codex TOML](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml), [Cursor JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
 
 ### Generic stdio config
 
@@ -136,6 +156,8 @@ The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you alrea
 | `ENABLE_WRITE_TOOLS` | No | `false` | Enables write-capable tools |
 | `ENABLE_DESTRUCTIVE_TOOLS` | No | `false` | Enables destructive tools that also require per-call confirmation |
 | `ENABLE_DRY_RUN` | No | `false` | Returns intended write requests without mutating GitLab |
+| `PROJECT_ALIASES` | No | empty | Comma-separated `alias=group/project` mappings for `project_id` inputs |
+| `GROUP_ALIASES` | No | empty | Comma-separated `alias=my-group` mappings for `group_id` inputs |
 
 ### Access controls and limits
 
@@ -159,6 +181,151 @@ The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you alrea
 | `EXPOSE_SECRET_VARIABLE_VALUES` | `false` | Keeps CI/CD secret values redacted unless explicitly enabled |
 
 See [`.env.example`](https://github.com/DevquasarX9/mcp-gitlab/blob/main/.env.example) for a complete local template.
+
+### Aliases
+
+If you repeatedly work with the same projects or groups, you can define explicit aliases:
+
+```bash
+PROJECT_ALIASES=platform-api=platform/backend-api,storefront=commerce/storefront
+GROUP_ALIASES=platform=platform,commerce=commerce
+```
+
+After that, any tool expecting `project_id` or `group_id` can use the alias instead of the full path. Alias resolution is explicit and local to this server configuration.
+
+## Guided Prompts
+
+The server now exposes reusable MCP prompts so users do not need to memorize the full tool catalog first.
+
+Core workflow prompts:
+
+- `gitlab_review_merge_request_workflow`
+- `gitlab_explain_failed_pipeline_workflow`
+- `gitlab_summarize_project_status_workflow`
+- `gitlab_generate_weekly_delivery_summary_workflow`
+- `gitlab_assess_project_write_safety_workflow`
+
+Hero workflow prompts:
+
+- `gitlab_stale_merge_request_cleanup_workflow`
+- `gitlab_flaky_ci_triage_workflow`
+- `gitlab_release_readiness_check_workflow`
+- `gitlab_team_delivery_digest_workflow`
+- `gitlab_portfolio_delivery_overview_workflow`
+- `gitlab_summarize_commit_range_workflow`
+- `gitlab_summarize_directory_workflow`
+
+Example prompt requests inside an MCP client:
+
+```text
+Use gitlab_review_merge_request_workflow for project_id="platform-api" and merge_request_iid="42".
+```
+
+```text
+Use gitlab_flaky_ci_triage_workflow for project_id="platform-api" and ref="main".
+```
+
+These prompts point the model at the relevant `gitlab_*` tools for each workflow while keeping the actual data access explicit and structured.
+
+## Recommended Starting Points
+
+If you are trying the MCP for the first time, start with the orchestration tools rather than the lower-level primitives.
+
+Recommended first tools:
+
+- `gitlab_release_readiness_check`: one-call release go/caution/hold assessment for a project
+- `gitlab_flaky_ci_triage`: separates likely flaky CI from deterministic failures
+- `gitlab_stale_merge_request_cleanup`: identifies stale merge requests and recommends the next action for each sampled item
+- `gitlab_team_delivery_digest`: produces a concise project or group delivery summary plus a chat-ready status line
+
+Example calls:
+
+```json
+{
+  "project_id": "platform-api",
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_release_readiness_check`.
+
+```json
+{
+  "project_id": "platform-api",
+  "ref": "main",
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_flaky_ci_triage`.
+
+```json
+{
+  "project_id": "platform-api",
+  "stale_after_days": 14,
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_stale_merge_request_cleanup`.
+
+```json
+{
+  "scope_type": "group",
+  "scope_id": "platform",
+  "days": 7,
+  "output_format": "markdown"
+}
+```
+
+Use that with `gitlab_team_delivery_digest`.
+
+## Shareable Output Formats
+
+Selected higher-level tools support `output_format="markdown"` in addition to the default structured JSON response envelope.
+
+Current markdown-capable tools:
+
+- `gitlab_summarize_project_status`
+- `gitlab_explain_failed_pipeline`
+- `gitlab_stale_merge_request_cleanup`
+- `gitlab_flaky_ci_triage`
+- `gitlab_release_readiness_check`
+- `gitlab_team_delivery_digest`
+- `gitlab_portfolio_delivery_overview`
+- `gitlab_summarize_commit_range`
+- `gitlab_summarize_directory`
+- `gitlab_review_merge_request_risks`
+- `gitlab_generate_release_notes`
+- `gitlab_get_project_dashboard`
+
+Example calls:
+
+```json
+{
+  "project_id": "platform-api",
+  "output_format": "markdown"
+}
+```
+
+```json
+{
+  "project_id": "platform-api",
+  "pipeline_id": 12345,
+  "output_format": "markdown"
+}
+```
+
+```json
+{
+  "scope_type": "project",
+  "scope_id": "platform-api",
+  "days": 7,
+  "output_format": "markdown"
+}
+```
+
+This is useful when the result is intended for chat, a GitLab comment, or a status update, while `structured` remains the best default for agents that want to post-process the result.
 
 ## Token Setup
 
@@ -197,7 +364,7 @@ The server exposes concrete `gitlab_*` MCP tools. Representative examples:
 - Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
 - Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
 - Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`
-- Intelligence: `gitlab_summarize_project_status`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
+- Intelligence: `gitlab_summarize_project_status`, `gitlab_stale_merge_request_cleanup`, `gitlab_flaky_ci_triage`, `gitlab_release_readiness_check`, `gitlab_team_delivery_digest`, `gitlab_portfolio_delivery_overview`, `gitlab_summarize_commit_range`, `gitlab_summarize_directory`, `gitlab_review_merge_request_risks`, `gitlab_generate_release_notes`
 
 Write-capable tools stay unavailable until you explicitly enable them.
 
@@ -211,20 +378,30 @@ For design notes and implementation details, see:
 This server is useful when you want an agent to:
 
 - inspect a GitLab repository without cloning it first
+- summarize a commit range and identify risky files or directories with `gitlab_summarize_commit_range`
+- understand an unfamiliar repository area with `gitlab_summarize_directory`
 - review merge request diffs, discussions, approvals, and pipeline state together
-- summarize recent team activity across issues, merge requests, and pipelines
+- summarize recent team activity across issues, merge requests, and pipelines with `gitlab_team_delivery_digest`
+- assess cross-project portfolio health with `gitlab_portfolio_delivery_overview`
+- assess release readiness with `gitlab_release_readiness_check`
+- triage flaky CI with `gitlab_flaky_ci_triage`
+- clean up stale merge requests with `gitlab_stale_merge_request_cleanup`
 - trace a failed job back to its pipeline, commit, and merge request context
 - draft release notes from tags, compares, and recent delivery activity
 - assess whether a project is safe for AI-assisted writes before enabling write mode
+- produce a chat-ready delivery digest with markdown output
+- use guided prompts instead of manually selecting low-level tools
 
 If you want agents and other developers to discover the right tools quickly, refer to the actual MCP tool names in prompts, examples, and client instructions.
 
 ## Troubleshooting
 
+- Run `gitlab-mcp-server doctor` first when setup behavior is unclear.
 - `401 Unauthorized`: the token is invalid, expired, or using the wrong header mode.
 - `403 Forbidden`: the token lacks access or the resource is outside the configured allowlists.
 - `404 Not Found`: the resource is missing or hidden by GitLab permissions.
 - `429 Too Many Requests`: the GitLab rate limit was hit.
+- PAT about to expire: the `doctor` report and `gitlab_validate_token` advisory will flag short remaining lifetime when PAT introspection is available.
 - Large file or diff errors: raise payload limits only when you trust the workload.
 - CLI not found from source: run `npm run build` and invoke `node dist/cli.js`.
 

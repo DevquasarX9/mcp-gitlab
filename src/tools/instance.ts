@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { AppConfig } from "../config.js";
 import { assertGroupAllowed, assertProjectAllowed } from "../security/guards.js";
 import type { JsonMap } from "../gitlab/types.js";
 import { cleanQuery, registerTool, type ToolDeps } from "./shared.js";
@@ -20,6 +21,198 @@ function isAllowedGroup(config: ToolDeps["config"], group: JsonMap): boolean {
   } catch {
     return false;
   }
+}
+
+function extractTokenScopes(personalAccessToken: JsonMap | null): readonly string[] | null {
+  if (!personalAccessToken) {
+    return null;
+  }
+
+  const scopes = personalAccessToken.scopes;
+  if (Array.isArray(scopes)) {
+    return scopes.filter((scope): scope is string => typeof scope === "string" && scope.length > 0);
+  }
+
+  const scope = personalAccessToken.scope;
+  if (typeof scope === "string" && scope.length > 0) {
+    return [scope];
+  }
+
+  return null;
+}
+
+function daysUntil(isoDate: unknown): number | null {
+  if (typeof isoDate !== "string" || isoDate.length === 0) {
+    return null;
+  }
+
+  const target = Date.parse(isoDate);
+  if (!Number.isFinite(target)) {
+    return null;
+  }
+
+  return Math.ceil((target - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+function modeSummary(config: AppConfig): string {
+  if (config.enableDestructiveTools) {
+    return "destructive-enabled";
+  }
+
+  if (config.enableWriteTools) {
+    return "write-enabled";
+  }
+
+  return "read-only";
+}
+
+export function buildTokenValidationAdvisory(
+  config: AppConfig,
+  personalAccessToken: JsonMap | null
+): JsonMap {
+  const tokenScopes = extractTokenScopes(personalAccessToken);
+  const hasReadApiScope = tokenScopes === null
+    ? null
+    : tokenScopes.includes("read_api") || tokenScopes.includes("api");
+  const hasWriteApiScope = tokenScopes === null ? null : tokenScopes.includes("api");
+  const expiryDays = daysUntil(personalAccessToken?.expires_at);
+
+  const likelyBlockedCapabilities: string[] = [];
+  const warnings: string[] = [];
+  const recommendedNextChecks: string[] = [];
+
+  if (!config.enableWriteTools) {
+    likelyBlockedCapabilities.push("All write-capable tools are blocked because ENABLE_WRITE_TOOLS is disabled.");
+  }
+
+  if (!config.enableDestructiveTools) {
+    likelyBlockedCapabilities.push(
+      "Destructive tools are blocked because ENABLE_DESTRUCTIVE_TOOLS is disabled."
+    );
+  }
+
+  if (config.projectAllowlist.length > 0) {
+    likelyBlockedCapabilities.push("Projects outside PROJECT_ALLOWLIST are blocked.");
+  }
+
+  if (config.groupAllowlist.length > 0) {
+    likelyBlockedCapabilities.push("Groups and projects outside GROUP_ALLOWLIST are blocked.");
+  }
+
+  if (config.projectDenylist.length > 0) {
+    likelyBlockedCapabilities.push("Projects listed in PROJECT_DENYLIST are blocked.");
+  }
+
+  if (config.enableWriteTools && hasWriteApiScope === false) {
+    likelyBlockedCapabilities.push(
+      "Write-capable tools will likely fail because the token scopes do not include api."
+    );
+    warnings.push(
+      "ENABLE_WRITE_TOOLS is enabled, but the detected personal access token scopes do not include api."
+    );
+  }
+
+  if (hasReadApiScope === false) {
+    warnings.push(
+      "The detected personal access token scopes do not include read_api or api, so some repository and project reads may fail."
+    );
+  }
+
+  if (!config.enableWriteTools && hasWriteApiScope === true) {
+    warnings.push(
+      "The token appears capable of writes, but this server is still operating in read-only mode until ENABLE_WRITE_TOOLS is enabled."
+    );
+  }
+
+  if (config.projectAllowlist.length === 0 && config.groupAllowlist.length === 0) {
+    warnings.push(
+      "No project or group allowlists are configured, so accessible scope is controlled only by the GitLab token permissions."
+    );
+  }
+
+  if (Object.keys(config.projectAliases).length > 0 || Object.keys(config.groupAliases).length > 0) {
+    recommendedNextChecks.push(
+      "If you use aliases, confirm the expected canonical project and group paths before sharing example prompts with the team."
+    );
+  }
+
+  if (config.enableDestructiveTools && !config.enableWriteTools) {
+    warnings.push(
+      "ENABLE_DESTRUCTIVE_TOOLS is enabled without ENABLE_WRITE_TOOLS, so destructive actions remain inconsistent with the broader write posture."
+    );
+  }
+
+  if (expiryDays !== null && expiryDays < 0) {
+    warnings.push("The detected personal access token reports an expiry date in the past.");
+  } else if (expiryDays !== null && expiryDays <= 14) {
+    warnings.push(`The detected personal access token expires in ${expiryDays} day(s).`);
+  }
+
+  recommendedNextChecks.push(
+    "Run gitlab_list_accessible_projects with membership=true to confirm which projects are visible to this token."
+  );
+
+  if (config.projectAllowlist.length > 0 || config.groupAllowlist.length > 0) {
+    recommendedNextChecks.push(
+      "Verify that your intended project is inside the configured allowlists before relying on agent workflows."
+    );
+  }
+
+  if (!config.enableWriteTools) {
+    recommendedNextChecks.push(
+      "Keep using read-only workflows, or enable ENABLE_WRITE_TOOLS=true only when safe-write tools are explicitly needed."
+    );
+  } else if (!config.enableDryRun) {
+    recommendedNextChecks.push(
+      "Consider enabling ENABLE_DRY_RUN=true before the first write-enabled session so intended mutations can be reviewed safely."
+    );
+  }
+
+  if (config.enableWriteTools && hasWriteApiScope === false) {
+    recommendedNextChecks.push(
+      "Use a token with api scope before attempting write-capable tools."
+    );
+  }
+
+  if (!config.enableDestructiveTools) {
+    recommendedNextChecks.push(
+      "Leave destructive tools disabled unless you have a narrow, reviewed need for them."
+    );
+  }
+
+  if (tokenScopes === null) {
+    recommendedNextChecks.push(
+      "If this is not a personal access token, confirm the token type and resource scope directly in GitLab because PAT scope introspection is unavailable."
+    );
+  }
+
+  return {
+    server_mode: modeSummary(config),
+    token_kind: personalAccessToken ? "personal_access_token" : "project_group_or_oauth_token",
+    scope_summary: {
+      token_scopes_known: tokenScopes !== null,
+      token_scopes: tokenScopes ?? [],
+      has_read_api_scope: hasReadApiScope,
+      has_write_api_scope: hasWriteApiScope
+    },
+    access_controls: {
+      project_aliases_enabled: Object.keys(config.projectAliases).length > 0,
+      group_aliases_enabled: Object.keys(config.groupAliases).length > 0,
+      project_allowlist_enabled: config.projectAllowlist.length > 0,
+      group_allowlist_enabled: config.groupAllowlist.length > 0,
+      project_denylist_enabled: config.projectDenylist.length > 0,
+      project_alias_count: Object.keys(config.projectAliases).length,
+      group_alias_count: Object.keys(config.groupAliases).length,
+      project_allowlist_count: config.projectAllowlist.length,
+      group_allowlist_count: config.groupAllowlist.length,
+      project_denylist_count: config.projectDenylist.length
+    },
+    likely_blocked_capabilities: likelyBlockedCapabilities,
+    warnings,
+    recommended_next_checks: recommendedNextChecks,
+    dry_run_recommended: config.enableWriteTools && !config.enableDryRun,
+    token_expiry_days: expiryDays
+  };
 }
 
 export function registerInstanceTools(deps: ToolDeps): void {
@@ -65,7 +258,8 @@ export function registerInstanceTools(deps: ToolDeps): void {
         write_tools_enabled: config.enableWriteTools,
         destructive_tools_enabled: config.enableDestructiveTools,
         dry_run_enabled: config.enableDryRun,
-        personal_access_token: patDetails
+        personal_access_token: patDetails,
+        advisory: buildTokenValidationAdvisory(config, patDetails)
       };
     }
   });

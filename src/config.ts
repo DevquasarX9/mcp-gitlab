@@ -9,6 +9,8 @@ const envSchema = z.object({
   ENABLE_WRITE_TOOLS: z.string().default("false"),
   ENABLE_DESTRUCTIVE_TOOLS: z.string().default("false"),
   ENABLE_DRY_RUN: z.string().default("false"),
+  PROJECT_ALIASES: z.string().default(""),
+  GROUP_ALIASES: z.string().default(""),
   PROJECT_ALLOWLIST: z.string().default(""),
   GROUP_ALLOWLIST: z.string().default(""),
   PROJECT_DENYLIST: z.string().default(""),
@@ -24,6 +26,7 @@ const envSchema = z.object({
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type TokenHeaderMode = "bearer" | "private-token";
+export type AliasMap = Readonly<Record<string, string>>;
 
 export interface AppConfig {
   readonly gitlabBaseUrl: string;
@@ -32,6 +35,8 @@ export interface AppConfig {
   readonly enableWriteTools: boolean;
   readonly enableDestructiveTools: boolean;
   readonly enableDryRun: boolean;
+  readonly projectAliases: AliasMap;
+  readonly groupAliases: AliasMap;
   readonly projectAllowlist: readonly string[];
   readonly groupAllowlist: readonly string[];
   readonly projectDenylist: readonly string[];
@@ -55,6 +60,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     enableWriteTools: parseBoolean(parsed.ENABLE_WRITE_TOOLS),
     enableDestructiveTools: parseBoolean(parsed.ENABLE_DESTRUCTIVE_TOOLS),
     enableDryRun: parseBoolean(parsed.ENABLE_DRY_RUN),
+    projectAliases: parseAliasMap(parsed.PROJECT_ALIASES, "PROJECT_ALIASES"),
+    groupAliases: parseAliasMap(parsed.GROUP_ALIASES, "GROUP_ALIASES"),
     projectAllowlist: parseCsvList(parsed.PROJECT_ALLOWLIST),
     groupAllowlist: parseCsvList(parsed.GROUP_ALLOWLIST),
     projectDenylist: parseCsvList(parsed.PROJECT_DENYLIST),
@@ -88,6 +95,33 @@ function parseCsvList(value: string): readonly string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+function parseAliasMap(value: string, name: string): AliasMap {
+  if (value.trim().length === 0) {
+    return {};
+  }
+
+  const aliases: Record<string, string> = {};
+
+  for (const entry of value.split(",").map((item) => item.trim()).filter((item) => item.length > 0)) {
+    const separatorIndex = entry.indexOf("=");
+
+    if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
+      throw new Error(`${name} entries must use alias=value format. Invalid entry: "${entry}".`);
+    }
+
+    const alias = entry.slice(0, separatorIndex).trim();
+    const target = entry.slice(separatorIndex + 1).trim();
+
+    if (alias.length === 0 || target.length === 0) {
+      throw new Error(`${name} entries must use alias=value format. Invalid entry: "${entry}".`);
+    }
+
+    aliases[alias] = target;
+  }
+
+  return aliases;
 }
 
 function parsePositiveInt(value: string, name: string): number {
