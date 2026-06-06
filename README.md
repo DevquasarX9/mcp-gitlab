@@ -336,6 +336,8 @@ Recommended scopes:
 
 Notes:
 
+- `ENABLE_WRITE_TOOLS=true` only enables the MCP server's write-capable tools. It does not add GitLab permissions to the configured token.
+- If write tools are enabled but GitLab returns `insufficient_scope`, the MCP write-mode guard has passed and the token is still missing the required GitLab scope, usually `api`.
 - Project and group access tokens work when their scopes match the requested resources.
 - Some self-managed GitLab instances work better with `GITLAB_TOKEN_HEADER_MODE=private-token`.
 - Keep write and destructive modes off unless you explicitly need them.
@@ -399,6 +401,7 @@ If you want agents and other developers to discover the right tools quickly, ref
 - Run `gitlab-mcp-server doctor` first when setup behavior is unclear.
 - `401 Unauthorized`: the token is invalid, expired, or using the wrong header mode.
 - `403 Forbidden`: the token lacks access or the resource is outside the configured allowlists.
+- `403 insufficient_scope` on write tools after `ENABLE_WRITE_TOOLS=true`: write mode is enabled, but the GitLab credential is still not authorized for writes. Use `gitlab_validate_token` or `doctor`; personal access tokens should show `api` in their scopes. For project, group, or OAuth tokens, verify the token scope and project membership directly in GitLab because PAT scope introspection may be unavailable.
 - `404 Not Found`: the resource is missing or hidden by GitLab permissions.
 - `429 Too Many Requests`: the GitLab rate limit was hit.
 - PAT about to expire: the `doctor` report and `gitlab_validate_token` advisory will flag short remaining lifetime when PAT introspection is available.

@@ -26,6 +26,7 @@ Common error handling:
 
 - `401`: invalid or expired token
 - `403`: permission denied
+- `403` with `insufficient_scope`: write-mode guard has passed, but the configured GitLab token does not have the required scope for the requested write, usually `api`
 - `404`: project/group/resource not found or private
 - `409`: state conflict or SHA mismatch
 - `422`: validation error
