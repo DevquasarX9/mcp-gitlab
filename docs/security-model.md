@@ -15,6 +15,8 @@ Threats considered:
 ## Security posture
 
 - Read-only by default
+- `readonly` tool profile is the default MCP discovery surface
+- Disabled write and destructive tools are hidden from tool discovery by default
 - Write tools disabled unless `ENABLE_WRITE_TOOLS=true`
 - Destructive tools disabled unless `ENABLE_DESTRUCTIVE_TOOLS=true`
 - Destructive operations require `confirm_destructive=true`
@@ -22,6 +24,7 @@ Threats considered:
 - Project denylist supported
 - File/diff/response size limits enforced
 - Timeout limits enforced
+- HTTP transport is localhost-only by default, with host/origin checks and optional bearer auth
 - Audit logging enabled when configured
 - Secret redaction applied to audit output
 - No shell execution anywhere in the implementation
@@ -74,6 +77,16 @@ The server does not bypass GitLab branch protection. Merge and pipeline operatio
 - No shelling out to `git`, `glab`, or system commands
 - All GitLab interactions are over the GitLab HTTP API only
 
+## HTTP transport safeguards
+
+- Stdio remains the default transport.
+- HTTP mode binds to `127.0.0.1` by default.
+- The HTTP server validates allowed hostnames to reduce DNS rebinding risk.
+- Missing origins are allowed for non-browser clients, localhost browser origins are allowed, and remote browser origins require explicit `MCP_HTTP_ALLOWED_ORIGINS` entries.
+- `MCP_HTTP_AUTH_TOKEN` enables bearer-token protection for HTTP requests.
+- Non-local binds are refused unless both `MCP_HTTP_ALLOW_NON_LOCALHOST=true` and `MCP_HTTP_AUTH_TOKEN` are configured.
+- CLI mode takes precedence over `MCP_TRANSPORT`, so `doctor` cannot be accidentally hidden by an HTTP-only environment.
+
 ## Logging without secrets
 
 - Structured audit events
@@ -83,6 +96,9 @@ The server does not bypass GitLab branch protection. Merge and pipeline operatio
 ## Safe defaults
 
 - Read-only mode
+- Read-only tool profile
+- Hidden disabled write/destructive tools unless compatibility exposure is explicitly enabled
+- Localhost-only HTTP mode unless non-local binding is explicitly unlocked with bearer auth
 - Dry-run available for write tools
 - Redacted variable values
 - Capped job-trace output
@@ -91,5 +107,6 @@ The server does not bypass GitLab branch protection. Merge and pipeline operatio
 ## Residual risks
 
 - Job traces can still contain sensitive text not matching token-redaction patterns
+- HTTP mode can expose the server to additional client/network surfaces if non-local binding is enabled
 - GitLab API behavior varies slightly across versions and plan tiers
 - Some GitLab endpoints are deprecated and may need version-sensitive handling later

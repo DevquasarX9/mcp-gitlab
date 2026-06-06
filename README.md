@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/gitlab-mcp-cli)](https://www.npmjs.com/package/gitlab-mcp-cli)
 [![CI](https://github.com/DevquasarX9/mcp-gitlab/actions/workflows/ci.yml/badge.svg)](https://github.com/DevquasarX9/mcp-gitlab/actions/workflows/ci.yml)
 
-`gitlab-mcp-server` is a stdio [Model Context Protocol](https://modelcontextprotocol.io/) server for GitLab.com and self-managed GitLab.
+`gitlab-mcp-server` is a [Model Context Protocol](https://modelcontextprotocol.io/) server for GitLab.com and self-managed GitLab. It runs over stdio by default and also supports opt-in Streamable HTTP for local clients that need an HTTP endpoint.
 
 It gives AI agents and developer tools structured access to GitLab projects, repositories, issues, merge requests, pipelines, releases, governance data, and higher-level delivery summaries. The server is read-only by default and uses explicit gates for write and destructive actions.
 
@@ -19,6 +19,12 @@ It gives AI agents and developer tools structured access to GitLab projects, rep
 - AI-friendly tools: higher-level tools summarize project health, review risk, release notes, delivery status, and pipeline failures.
 - Self-managed support: works with `https://gitlab.com` and private GitLab instances.
 - Operational controls: allowlists, denylist, payload caps, timeout control, optional audit logging, and secret redaction.
+
+## When To Use This
+
+Use this server when you want a local or self-managed GitLab MCP server with conservative defaults, explicit write gates, project/group allowlists, and workflow-oriented summaries. It is especially useful for agents that need to inspect repositories, review merge requests, triage CI, assess release readiness, or produce delivery digests without cloning repositories first.
+
+The official GitLab MCP server is a good default when you want GitLab's beta hosted tool surface and Duo-backed features. `glab mcp serve` can be useful for CLI-centered experimentation. This package focuses on read-only-by-default local operation, guarded writes, broader GitLab API coverage, and higher-level DevOps workflow intelligence. See [docs/parity.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/parity.md) for the current mapping.
 
 ## Install
 
@@ -82,6 +88,7 @@ The doctor report validates GitLab connectivity and summarizes:
 - read-only, write-enabled, or destructive-enabled posture
 - token scope visibility when PAT introspection is available
 - allowlists, denylist, and alias counts
+- tool profile, HTTP bind posture, and payload limits
 - likely blocked capabilities and recommended next checks
 
 ## MCP Client Setup
@@ -90,6 +97,7 @@ Example client configs live in [`examples/clients/`](https://github.com/Devquasa
 
 - [Claude Code guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_code.md)
 - [Shared client setup guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/README.md)
+- [HTTP transport guide](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/http.md)
 - Raw config examples: [Claude Desktop JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/claude_desktop_config.json), [Codex TOML](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/codex-config.toml), [Cursor JSON](https://github.com/DevquasarX9/mcp-gitlab/blob/main/examples/clients/cursor.mcp.json)
 
 ### Generic stdio config
@@ -142,6 +150,39 @@ ENABLE_WRITE_TOOLS = "false"
 ENABLE_DESTRUCTIVE_TOOLS = "false"
 ```
 
+### HTTP transport
+
+Stdio remains the default transport. To run the local Streamable HTTP server, use the CLI subcommand:
+
+```bash
+GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx \
+gitlab-mcp-server serve-http
+```
+
+You can also enable HTTP with environment configuration:
+
+```bash
+MCP_TRANSPORT=http \
+GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx \
+gitlab-mcp-server
+```
+
+CLI mode takes precedence over `MCP_TRANSPORT`, so `gitlab-mcp-server doctor` still runs diagnostics even when `MCP_TRANSPORT=http` is present.
+
+Default HTTP endpoint:
+
+```text
+http://127.0.0.1:3333/mcp
+```
+
+HTTP safety defaults:
+
+- Binds to `127.0.0.1`.
+- Allows `localhost`, `127.0.0.1`, and `[::1]` host headers.
+- Allows missing origins and localhost browser origins.
+- Requires explicit `MCP_HTTP_ALLOWED_ORIGINS` entries for remote browser origins.
+- Refuses non-local binds unless both `MCP_HTTP_ALLOW_NON_LOCALHOST=true` and `MCP_HTTP_AUTH_TOKEN` are configured.
+
 ## Configuration
 
 The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you already pass an `/api/v4` URL, it is preserved.
@@ -153,6 +194,18 @@ The server normalizes `GITLAB_BASE_URL` to `/api/v4` automatically. If you alrea
 | `GITLAB_BASE_URL` | No | `https://gitlab.com` | GitLab instance base URL or `/api/v4` URL |
 | `GITLAB_TOKEN` | Yes |  | GitLab PAT, project access token, group access token, or OAuth bearer token |
 | `GITLAB_TOKEN_HEADER_MODE` | No | `bearer` | Use `private-token` when required by some self-managed setups |
+| `GITLAB_MCP_TOOL_PROFILE` | No | `readonly` | Limits MCP tool discovery to a workflow profile |
+| `GITLAB_MCP_ENABLED_TOOLS` | No | empty | Comma-separated explicit tool allowlist applied after the profile |
+| `GITLAB_MCP_DISABLED_TOOLS` | No | empty | Comma-separated explicit tool denylist applied after the profile |
+| `GITLAB_MCP_EXPOSE_DISABLED_WRITES` | No | `false` | Compatibility override to advertise write/destructive tools even when server-side gates are disabled |
+| `MCP_TRANSPORT` | No | `stdio` | Use `http` to run Streamable HTTP when no CLI mode is provided |
+| `MCP_HTTP_HOST` | No | `127.0.0.1` | HTTP bind host |
+| `MCP_HTTP_PORT` | No | `3333` | HTTP bind port |
+| `MCP_HTTP_PATH` | No | `/mcp` | Streamable HTTP MCP path |
+| `MCP_HTTP_ALLOWED_ORIGINS` | No | empty | Comma-separated browser origins allowed in HTTP mode |
+| `MCP_HTTP_ALLOWED_HOSTS` | No | `localhost,127.0.0.1,[::1]` | Comma-separated allowed hostnames for DNS rebinding protection |
+| `MCP_HTTP_AUTH_TOKEN` | No | unset | Optional bearer token required by HTTP mode; required for non-local binds |
+| `MCP_HTTP_ALLOW_NON_LOCALHOST` | No | `false` | Allows non-local HTTP binds only when a bearer token is also configured |
 | `ENABLE_WRITE_TOOLS` | No | `false` | Enables write-capable tools |
 | `ENABLE_DESTRUCTIVE_TOOLS` | No | `false` | Enables destructive tools that also require per-call confirmation |
 | `ENABLE_DRY_RUN` | No | `false` | Returns intended write requests without mutating GitLab |
@@ -192,6 +245,35 @@ GROUP_ALIASES=platform=platform,commerce=commerce
 ```
 
 After that, any tool expecting `project_id` or `group_id` can use the alias instead of the full path. Alias resolution is explicit and local to this server configuration.
+
+### Tool profiles
+
+The default profile is `readonly`, so MCP clients discover read-only tools first and disabled write/destructive tools stay hidden. Use a narrower profile when you want agents to see only the tools for a workflow:
+
+```bash
+GITLAB_MCP_TOOL_PROFILE=mr-review
+```
+
+Available profiles:
+
+- `readonly`
+- `core`
+- `mr-review`
+- `ci-triage`
+- `delivery`
+- `release`
+- `governance`
+- `maintainer-write`
+- `full`
+
+Explicit allow/deny lists are applied after the selected profile:
+
+```bash
+GITLAB_MCP_ENABLED_TOOLS=gitlab_get_merge_request,gitlab_get_merge_request_diff
+GITLAB_MCP_DISABLED_TOOLS=gitlab_merge_merge_request
+```
+
+For compatibility with older broad tool discovery, set `GITLAB_MCP_TOOL_PROFILE=full` and `GITLAB_MCP_EXPOSE_DISABLED_WRITES=true`. Execution is still protected by `ENABLE_WRITE_TOOLS`, `ENABLE_DESTRUCTIVE_TOOLS`, and per-call destructive confirmation.
 
 ## Guided Prompts
 
@@ -290,12 +372,16 @@ Current markdown-capable tools:
 - `gitlab_explain_failed_pipeline`
 - `gitlab_stale_merge_request_cleanup`
 - `gitlab_flaky_ci_triage`
+- `gitlab_compare_pipeline_runs`
+- `gitlab_trace_job_to_commit_and_merge_request`
 - `gitlab_release_readiness_check`
 - `gitlab_team_delivery_digest`
 - `gitlab_portfolio_delivery_overview`
+- `gitlab_get_group_delivery_overview`
 - `gitlab_summarize_commit_range`
 - `gitlab_summarize_directory`
 - `gitlab_review_merge_request_risks`
+- `gitlab_get_merge_request_review_state`
 - `gitlab_generate_release_notes`
 - `gitlab_get_project_dashboard`
 
@@ -345,10 +431,12 @@ Notes:
 ## Safety Model
 
 - Read-only is the default and recommended starting point.
+- The default tool profile is `readonly`; disabled write/destructive tools are hidden from MCP discovery.
 - Write-capable tools require `ENABLE_WRITE_TOOLS=true`.
 - Destructive tools require `ENABLE_DESTRUCTIVE_TOOLS=true` and `confirm_destructive=true` in the tool call.
 - `ENABLE_DRY_RUN=true` lets agents inspect a write request before changing GitLab.
 - Allowlists and the denylist are enforced before risky operations.
+- HTTP mode is localhost-only by default and requires a bearer token before non-local binds are allowed.
 - Secret CI/CD variable values remain redacted unless `EXPOSE_SECRET_VARIABLE_VALUES=true`.
 - The server does not execute shell commands. It talks directly to the GitLab REST and GraphQL APIs.
 
@@ -359,10 +447,10 @@ Security details: [SECURITY.md](https://github.com/DevquasarX9/mcp-gitlab/blob/m
 The server exposes concrete `gitlab_*` MCP tools. Representative examples:
 
 - Instance and access: `gitlab_validate_token`, `gitlab_get_current_user`, `gitlab_list_accessible_projects`
-- Projects and groups: `gitlab_search_projects`, `gitlab_get_project_dashboard`, `gitlab_get_group_delivery_overview`
+- Projects and groups: `gitlab_search`, `gitlab_search_projects`, `gitlab_search_labels`, `gitlab_get_project_dashboard`, `gitlab_get_group_delivery_overview`
 - Repository: `gitlab_get_file`, `gitlab_search_code`, `gitlab_compare_refs`, `gitlab_get_commit_diff`
 - Issues: `gitlab_list_issues`, `gitlab_create_issue`, `gitlab_add_issue_comment`
-- Merge requests: `gitlab_get_merge_request`, `gitlab_get_merge_request_review_state`, `gitlab_merge_merge_request`
+- Merge requests: `gitlab_get_merge_request`, `gitlab_get_merge_request_commits`, `gitlab_get_merge_request_pipelines`, `gitlab_get_merge_request_review_state`, `gitlab_merge_merge_request`
 - Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
 - Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
 - Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`
@@ -374,6 +462,7 @@ For design notes and implementation details, see:
 
 - [docs/tool-design.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/tool-design.md)
 - [docs/architecture.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/architecture.md)
+- [docs/parity.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/parity.md)
 
 ## Common AI Workflows
 
@@ -404,6 +493,7 @@ If you want agents and other developers to discover the right tools quickly, ref
 - `403 insufficient_scope` on write tools after `ENABLE_WRITE_TOOLS=true`: write mode is enabled, but the GitLab credential is still not authorized for writes. Use `gitlab_validate_token` or `doctor`; personal access tokens should show `api` in their scopes. For project, group, or OAuth tokens, verify the token scope and project membership directly in GitLab because PAT scope introspection may be unavailable.
 - `404 Not Found`: the resource is missing or hidden by GitLab permissions.
 - `429 Too Many Requests`: the GitLab rate limit was hit.
+- HTTP server refuses to start on `0.0.0.0` or another non-local host: set both `MCP_HTTP_ALLOW_NON_LOCALHOST=true` and `MCP_HTTP_AUTH_TOKEN`, then restrict `MCP_HTTP_ALLOWED_HOSTS` and `MCP_HTTP_ALLOWED_ORIGINS` to trusted values.
 - PAT about to expire: the `doctor` report and `gitlab_validate_token` advisory will flag short remaining lifetime when PAT introspection is available.
 - Large file or diff errors: raise payload limits only when you trust the workload.
 - CLI not found from source: run `npm run build` and invoke `node dist/cli.js`.
@@ -422,6 +512,7 @@ Supporting docs:
 
 - [CONTRIBUTING.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/CONTRIBUTING.md)
 - [CHANGELOG.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/CHANGELOG.md)
+- [docs/release-checklist.md](https://github.com/DevquasarX9/mcp-gitlab/blob/main/docs/release-checklist.md)
 - [docs/](https://github.com/DevquasarX9/mcp-gitlab/tree/main/docs)
 
 ## Publishing

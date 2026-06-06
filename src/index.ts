@@ -19,6 +19,7 @@ import { registerProjectDashboardTools } from "./tools/projectDashboard.js";
 import { registerReleaseTools } from "./tools/releases.js";
 import { registerRepositoryTools } from "./tools/repository.js";
 import { registerReviewStateTools } from "./tools/reviewState.js";
+import { registerSearchTools } from "./tools/search.js";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -39,6 +40,7 @@ export function createServer(config: AppConfig = loadConfig()): {
   registerPromptTools(server);
   registerInstanceTools(deps);
   registerProjectTools(deps);
+  registerSearchTools(deps);
   registerProjectDashboardTools(deps);
   registerRepositoryTools(deps);
   registerIssueTools(deps);

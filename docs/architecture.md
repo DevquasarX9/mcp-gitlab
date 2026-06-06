@@ -5,7 +5,7 @@
 - Language: TypeScript
 - Runtime: Node.js
 - MCP SDK: official stable `@modelcontextprotocol/sdk` v1.x
-- Transport in this implementation: stdio
+- Transport in this implementation: stdio by default, opt-in Streamable HTTP for local clients
 - HTTP client: `undici`
 - Validation: `zod`
 - Tests: `vitest`
@@ -15,6 +15,7 @@
 ```text
 src/
   config.ts
+  httpServer.ts
   index.ts
   gitlab/
     client.ts
@@ -54,6 +55,18 @@ Environment-driven, with safe defaults:
 - `GITLAB_BASE_URL`
 - `GITLAB_TOKEN`
 - `GITLAB_TOKEN_HEADER_MODE`
+- `GITLAB_MCP_TOOL_PROFILE`
+- `GITLAB_MCP_ENABLED_TOOLS`
+- `GITLAB_MCP_DISABLED_TOOLS`
+- `GITLAB_MCP_EXPOSE_DISABLED_WRITES`
+- `MCP_TRANSPORT`
+- `MCP_HTTP_HOST`
+- `MCP_HTTP_PORT`
+- `MCP_HTTP_PATH`
+- `MCP_HTTP_ALLOWED_ORIGINS`
+- `MCP_HTTP_ALLOWED_HOSTS`
+- `MCP_HTTP_AUTH_TOKEN`
+- `MCP_HTTP_ALLOW_NON_LOCALHOST`
 - `ENABLE_WRITE_TOOLS`
 - `ENABLE_DESTRUCTIVE_TOOLS`
 - `ENABLE_DRY_RUN`
@@ -90,6 +103,16 @@ Environment-driven, with safe defaults:
 - Timeout via `AbortSignal.timeout`
 - Response-size cap enforced before/after body read
 - Audit helper on the REST client for consistent logging
+
+## MCP transport design
+
+- Stdio remains the default transport for broad MCP client compatibility.
+- HTTP mode uses the MCP SDK Streamable HTTP server transport.
+- CLI HTTP mode is available through `serve-http` and `--http`.
+- `MCP_TRANSPORT=http` also enables HTTP mode when no CLI subcommand is provided.
+- CLI mode takes precedence over `MCP_TRANSPORT`, so diagnostics stay reachable with `doctor`.
+- HTTP binds to localhost by default and refuses non-local binds unless both an explicit override and bearer token are configured.
+- Host and origin allowlists are enforced before MCP request handling.
 
 ## Pagination abstraction
 
@@ -133,6 +156,7 @@ Planned later:
 ## Testing strategy
 
 - Unit tests first for guardrails and parsing
+- MCP tool-discovery tests for profile filtering and hidden write/destructive tools
 - Add integration tests later with mocked GitLab HTTP responses
 - Keep intelligence tools deterministic and API-driven, not prompt-driven
 
@@ -140,7 +164,7 @@ Planned later:
 
 - Two-stage Docker build
 - Production image installs only runtime dependencies
-- Container entrypoint runs stdio server
+- Container entrypoint runs the stdio server unless HTTP mode is explicitly configured
 
 ## CI/CD pipeline recommendation
 

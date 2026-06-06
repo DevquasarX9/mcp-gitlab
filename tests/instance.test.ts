@@ -7,6 +7,17 @@ const baseConfig: AppConfig = {
   gitlabBaseUrl: "https://gitlab.com/api/v4",
   gitlabToken: "test-token",
   tokenHeaderMode: "bearer",
+  toolProfile: "readonly",
+  enabledTools: [],
+  disabledTools: [],
+  exposeDisabledWriteTools: false,
+  mcpTransport: "stdio",
+  mcpHttpHost: "127.0.0.1",
+  mcpHttpPort: 3333,
+  mcpHttpPath: "/mcp",
+  mcpHttpAllowedOrigins: [],
+  mcpHttpAllowedHosts: ["localhost", "127.0.0.1", "[::1]"],
+  mcpHttpAllowNonLocalhost: false,
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
@@ -120,6 +131,80 @@ describe("buildTokenValidationAdvisory", () => {
     );
     expect(advisory.recommended_next_checks).toContain(
       "Consider enabling ENABLE_DRY_RUN=true before the first write-enabled session so intended mutations can be reviewed safely."
+    );
+  });
+
+  it("warns when write and destructive modes are enabled without allowlists", () => {
+    const advisory = buildTokenValidationAdvisory(
+      {
+        ...baseConfig,
+        enableWriteTools: true,
+        enableDestructiveTools: true
+      },
+      {
+        scopes: ["api"],
+        expires_at: "2099-01-01"
+      }
+    );
+
+    expect(advisory).toMatchObject({
+      server_mode: "destructive-enabled",
+      security_posture: {
+        write_mode_without_allowlist: true,
+        destructive_mode_enabled: true
+      }
+    });
+    expect(advisory.warnings).toContain(
+      "ENABLE_WRITE_TOOLS is enabled without PROJECT_ALLOWLIST or GROUP_ALLOWLIST, so any project visible to the token may be writable."
+    );
+    expect(advisory.warnings).toContain(
+      "ENABLE_DESTRUCTIVE_TOOLS is enabled; destructive tools still require confirm_destructive=true but should be used only with narrow allowlists."
+    );
+    expect(advisory.warnings).toContain(
+      "Destructive tools are enabled without PROJECT_ALLOWLIST or GROUP_ALLOWLIST."
+    );
+    expect(advisory.recommended_next_checks).toContain(
+      "Configure PROJECT_ALLOWLIST or GROUP_ALLOWLIST before write-enabled sessions so agent writes stay inside reviewed targets."
+    );
+    expect(advisory.recommended_next_checks).toContain(
+      "Keep destructive mode temporary, scoped by allowlists, and paired with per-call confirm_destructive=true review."
+    );
+  });
+
+  it("surfaces non-local HTTP bind risk and startup blockers", () => {
+    const advisory = buildTokenValidationAdvisory(
+      {
+        ...baseConfig,
+        mcpTransport: "http",
+        mcpHttpHost: "0.0.0.0"
+      },
+      {
+        scopes: ["read_api"],
+        expires_at: "2099-01-01"
+      }
+    );
+
+    expect(advisory).toMatchObject({
+      security_posture: {
+        http_bind_is_local: false,
+        http_auth_configured: false,
+        http_non_local_startup_blocked: true,
+        response_caps: {
+          max_file_size_bytes: 1_048_576,
+          max_diff_size_bytes: 2_097_152,
+          max_api_response_bytes: 4_194_304,
+          gitlab_http_timeout_ms: 30_000
+        }
+      }
+    });
+    expect(advisory.likely_blocked_capabilities).toContain(
+      "HTTP transport startup is blocked because non-local binding requires MCP_HTTP_ALLOW_NON_LOCALHOST=true and MCP_HTTP_AUTH_TOKEN."
+    );
+    expect(advisory.warnings).toContain(
+      "MCP_HTTP_HOST is configured outside localhost without the required non-local override and bearer token."
+    );
+    expect(advisory.recommended_next_checks).toContain(
+      "For non-local HTTP mode, set MCP_HTTP_AUTH_TOKEN, MCP_HTTP_ALLOW_NON_LOCALHOST=true, and strict MCP_HTTP_ALLOWED_HOSTS/MCP_HTTP_ALLOWED_ORIGINS."
     );
   });
 

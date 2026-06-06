@@ -36,8 +36,17 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Check documentation secrets
+        run: npm run docs:check-secrets
+
       - name: Build
         run: npm run build
+
+      - name: Smoke test stdio transport
+        run: npm run smoke:stdio
+
+      - name: Smoke test HTTP transport
+        run: npm run smoke:http
 
       - name: Verify package contents
         run: npm run pack:dry-run

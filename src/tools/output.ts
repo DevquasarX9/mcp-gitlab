@@ -87,6 +87,34 @@ function summarizePipeline(pipeline: JsonMap): string {
   return `${label} (${status})`;
 }
 
+function summarizeJob(job: JsonMap): string {
+  const stage = stringValue(job.stage, "unknown");
+  const name = stringValue(job.name, "unnamed job");
+  const status = stringValue(job.status, "unknown");
+
+  return `${stage}/${name} (${status})`;
+}
+
+function summarizeStatusChange(change: JsonMap): string {
+  const stage = stringValue(change.stage, "unknown");
+  const name = stringValue(change.name, "unnamed job");
+  const leftStatus = stringValue(change.left_status, "unknown");
+  const rightStatus = stringValue(change.right_status, "unknown");
+
+  return `${stage}/${name}: ${leftStatus} -> ${rightStatus}`;
+}
+
+function summarizeDurationChange(change: JsonMap): string {
+  const stage = stringValue(change.stage, "unknown");
+  const name = stringValue(change.name, "unnamed job");
+  const leftDuration = numberValue(change.left_duration_seconds);
+  const rightDuration = numberValue(change.right_duration_seconds);
+  const delta = numberValue(change.delta_seconds);
+  const deltaPrefix = delta > 0 ? "+" : "";
+
+  return `${stage}/${name}: ${leftDuration}s -> ${rightDuration}s (${deltaPrefix}${delta}s)`;
+}
+
 function summarizeIssue(issue: JsonMap): string {
   const reference = stringValue(issue.reference ?? issue.iid ?? issue.id, "issue");
   const title = stringValue(issue.title, "Untitled issue");
@@ -180,6 +208,85 @@ export function formatFailedPipelineMarkdown(data: JsonMap): string {
     "",
     "## Failed Job Samples",
     ...jobSections
+  ].join("\n");
+}
+
+export function formatPipelineComparisonMarkdown(data: JsonMap): string {
+  const leftPipeline = asMap(data.left_pipeline);
+  const rightPipeline = asMap(data.right_pipeline);
+  const comparison = asMap(data.comparison);
+  const signals = asMap(data.signals);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+
+  return [
+    `# Pipeline Comparison: ${scalarValue(leftPipeline.id ?? leftPipeline.iid, "left")} -> ${scalarValue(rightPipeline.id ?? rightPipeline.iid, "right")}`,
+    "",
+    `- Comparison status: ${stringValue(data.comparison_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Added jobs: ${numberValue(signals.added_job_count)}`,
+    `- Removed jobs: ${numberValue(signals.removed_job_count)}`,
+    `- Status changes: ${numberValue(signals.status_change_count)}`,
+    `- Duration changes: ${numberValue(signals.duration_change_count)}`,
+    "",
+    "## Status Changes",
+    ...bulletList(limitedList(asList(comparison.status_changes), summarizeStatusChange, 10)),
+    "",
+    "## Added Jobs",
+    ...bulletList(limitedList(asList(comparison.added_jobs), summarizeJob, 10)),
+    "",
+    "## Removed Jobs",
+    ...bulletList(limitedList(asList(comparison.removed_jobs), summarizeJob, 10)),
+    "",
+    "## Duration Changes",
+    ...bulletList(limitedList(asList(comparison.duration_changes), summarizeDurationChange, 10)),
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
+export function formatJobTraceMarkdown(data: JsonMap): string {
+  const job = asMap(data.job);
+  const pipeline = asMap(data.pipeline);
+  const commit = asMap(data.commit);
+  const signals = asMap(data.signals);
+  const mergeRequests = asList(data.merge_requests);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+
+  return [
+    `# Job Trace Context: ${stringValue(job.name, scalarValue(job.id, "unknown job"))}`,
+    "",
+    `- Trace status: ${stringValue(data.trace_status, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Job status: ${stringValue(signals.job_status, "unknown")}`,
+    `- Pipeline status: ${stringValue(signals.pipeline_status, "unknown")}`,
+    `- Commit: ${stringValue(commit.short_id ?? commit.id, "unknown")}`,
+    `- Related merge requests: ${numberValue(signals.related_merge_request_count)}`,
+    "",
+    "## Related Merge Requests",
+    ...bulletList(limitedList(mergeRequests, summarizeMergeRequest, 10)),
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions),
+    "",
+    "## Source",
+    ...bulletList([
+      `job ${scalarValue(job.id, "unknown")}`,
+      `pipeline ${scalarValue(pipeline.id ?? pipeline.iid, "unknown")}`,
+      `commit ${stringValue(commit.id, "unknown")}`
+    ])
   ].join("\n");
 }
 
@@ -497,6 +604,56 @@ export function formatPortfolioDeliveryOverviewMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatGroupDeliveryOverviewMarkdown(data: JsonMap): string {
+  const group = asMap(data.group);
+  const counts = asMap(data.counts);
+  const sampleWindow = asMap(data.sample_window);
+  const sampleLimits = asMap(data.sample_limits);
+  const sampleInsights = asMap(data.sample_insights);
+  const healthReasons = asList(data.health_reasons)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const highlights = asMap(data.highlights);
+
+  return [
+    `# Group Delivery Overview: ${stringValue(group.full_path ?? group.name ?? group.id, "unknown group")}`,
+    "",
+    `- Delivery status: ${stringValue(data.delivery_status, "unknown")}`,
+    `- Confidence: ${stringValue(data.confidence, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Projects: ${numberValue(counts.projects)}`,
+    `- Open merge requests: ${numberValue(counts.open_merge_requests)}`,
+    `- Open issues: ${numberValue(counts.open_issues)}`,
+    `- Sampled projects: ${numberValue(sampleWindow.projects)} / limit ${numberValue(sampleLimits.projects)}`,
+    `- Sampled merge requests: ${numberValue(sampleWindow.merge_requests)} / limit ${numberValue(sampleLimits.merge_requests)}`,
+    `- Sampled issues: ${numberValue(sampleWindow.issues)} / limit ${numberValue(sampleLimits.issues)}`,
+    "",
+    "## Health Reasons",
+    ...bulletList(healthReasons.length > 0 ? healthReasons : ["No major group delivery concerns in the sampled data."]),
+    "",
+    "## Attention Counts",
+    ...bulletList([
+      `projects needing attention: ${numberValue(sampleInsights.projects_needing_attention)}`,
+      `merge requests needing attention: ${numberValue(sampleInsights.merge_requests_needing_attention)}`,
+      `unassigned issues: ${numberValue(sampleInsights.unassigned_issues)}`,
+      `overdue issues: ${numberValue(sampleInsights.overdue_issues)}`
+    ]),
+    "",
+    "## Projects Needing Attention",
+    ...bulletList(limitedList(asList(highlights.projects_needing_attention), summarizeGroupProject, 5)),
+    "",
+    "## Merge Requests Needing Attention",
+    ...bulletList(limitedList(asList(highlights.merge_requests_needing_attention), summarizeMergeRequest, 5)),
+    "",
+    "## Unassigned Issues",
+    ...bulletList(limitedList(asList(highlights.unassigned_issues), summarizeIssue, 5)),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 export function formatProjectDashboardMarkdown(data: JsonMap): string {
   const project = asMap(data.project);
   const counts = asMap(data.counts);
@@ -535,6 +692,45 @@ export function formatProjectDashboardMarkdown(data: JsonMap): string {
   ].join("\n");
 }
 
+export function formatMergeRequestReviewStateMarkdown(data: JsonMap): string {
+  const project = asMap(data.project);
+  const mergeRequest = asMap(data.merge_request);
+  const approvals = asMap(data.approvals);
+  const discussionStatus = asMap(data.discussion_status);
+  const diffStats = asMap(data.diff_stats);
+  const headPipeline = asMap(data.head_pipeline);
+  const blockers = asList(data.blockers)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const warnings = asList(data.warnings)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const nextActions = asList(data.next_actions)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+
+  return [
+    `# Merge Request Review State: !${stringValue(mergeRequest.iid, "unknown")}`,
+    "",
+    `- Project: ${stringValue(project.full_path, "unknown project")}`,
+    `- Title: ${stringValue(mergeRequest.title, "Untitled merge request")}`,
+    `- Review status: ${stringValue(data.review_status, "unknown")}`,
+    `- Ready for merge: ${data.is_ready_for_merge === true ? "yes" : "no"}`,
+    `- Confidence: ${stringValue(data.confidence, "unknown")}`,
+    `- Summary: ${stringValue(data.summary, "n/a")}`,
+    `- Approvals left: ${numberValue(approvals.approvals_left)}`,
+    `- Unresolved discussions: ${numberValue(discussionStatus.unresolved_discussions_count)}`,
+    `- Changed files: ${numberValue(diffStats.file_count)}`,
+    `- Head pipeline status: ${stringValue(headPipeline.status, "unknown")}`,
+    "",
+    "## Blockers",
+    ...bulletList(blockers),
+    "",
+    "## Warnings",
+    ...bulletList(warnings),
+    "",
+    "## Next Actions",
+    ...bulletList(nextActions)
+  ].join("\n");
+}
+
 function summarizeFlakyJob(job: JsonMap): string {
   const name = stringValue(job.name, "unnamed job");
   const failureRate = typeof job.failure_rate === "number"
@@ -563,6 +759,16 @@ function summarizeAttentionProject(project: JsonMap): string {
   const attentionReason = stringValue(project.attention_reason, "Needs attention");
 
   return `${path} (${latestPipelineStatus}) - ${attentionReason}`;
+}
+
+function summarizeGroupProject(project: JsonMap): string {
+  const path = stringValue(project.full_path ?? project.name ?? project.id, "unknown project");
+  const status = stringValue(project.delivery_status, "unknown");
+  const reasons = asList(project.attention_reasons)
+    .filter((item): item is string => typeof item === "string" && item.length > 0);
+  const leadReason = reasons[0] ?? "No highlighted issues in the current sample.";
+
+  return `${path} [${status}] - ${leadReason}`;
 }
 
 function summarizePortfolioProject(project: JsonMap): string {

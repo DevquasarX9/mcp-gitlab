@@ -7,6 +7,17 @@ const baseConfig: AppConfig = {
   gitlabBaseUrl: "https://gitlab.com/api/v4",
   gitlabToken: "test-token",
   tokenHeaderMode: "bearer",
+  toolProfile: "readonly",
+  enabledTools: [],
+  disabledTools: [],
+  exposeDisabledWriteTools: false,
+  mcpTransport: "stdio",
+  mcpHttpHost: "127.0.0.1",
+  mcpHttpPort: 3333,
+  mcpHttpPath: "/mcp",
+  mcpHttpAllowedOrigins: [],
+  mcpHttpAllowedHosts: ["localhost", "127.0.0.1", "[::1]"],
+  mcpHttpAllowNonLocalhost: false,
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
@@ -26,13 +37,20 @@ const baseConfig: AppConfig = {
 
 describe("resolveCliMode", () => {
   it("defaults to server mode", () => {
-    expect(resolveCliMode([])).toBe("server");
-    expect(resolveCliMode(["serve"])).toBe("server");
+    expect(resolveCliMode([], {})).toBe("server");
+    expect(resolveCliMode(["serve"], {})).toBe("server");
   });
 
   it("recognizes doctor mode", () => {
-    expect(resolveCliMode(["doctor"])).toBe("doctor");
-    expect(resolveCliMode(["--doctor"])).toBe("doctor");
+    expect(resolveCliMode(["doctor"], {})).toBe("doctor");
+    expect(resolveCliMode(["--doctor"], { MCP_TRANSPORT: "http" })).toBe("doctor");
+  });
+
+  it("recognizes HTTP mode from CLI or env with CLI taking precedence", () => {
+    expect(resolveCliMode(["serve-http"], {})).toBe("http");
+    expect(resolveCliMode(["--http"], {})).toBe("http");
+    expect(resolveCliMode([], { MCP_TRANSPORT: "http" })).toBe("http");
+    expect(resolveCliMode(["doctor"], { MCP_TRANSPORT: "http" })).toBe("doctor");
   });
 });
 
@@ -89,6 +107,10 @@ describe("formatDoctorReport", () => {
     expect(report).toContain("GitLab MCP Doctor");
     expect(report).toContain("Authenticated user: alice (Alice)");
     expect(report).toContain("Server mode: write-enabled");
+    expect(report).toContain("MCP transport: stdio");
+    expect(report).toContain("HTTP host: 127.0.0.1");
+    expect(report).toContain("HTTP localhost bind: yes");
+    expect(report).toContain("Max API response bytes: 4194304");
     expect(report).toContain("Token scopes: read_api, api");
     expect(report).toContain("Warnings");
     expect(report).toContain("Recommended Next Checks");

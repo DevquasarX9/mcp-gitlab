@@ -2,6 +2,11 @@ import { z } from "zod";
 
 import { GitLabGraphQLClient } from "../gitlab/graphqlClient.js";
 import type { JsonMap } from "../gitlab/types.js";
+import {
+  formatMergeRequestReviewStateMarkdown,
+  outputFormatSchema,
+  presentOutput
+} from "./output.js";
 import { registerTool, type ToolDeps } from "./shared.js";
 
 interface GraphQLConnection<TNode> {
@@ -307,11 +312,51 @@ export function summarizeMergeRequestReviewState(mergeRequest: GraphQLMergeReque
       resolved_at: discussion.resolvedAt ?? null,
       resolved_by: discussion.resolvedBy ? toUserSummary(discussion.resolvedBy) : null
     }));
+  const nextActions: string[] = [];
+  const warnings: string[] = [];
+
+  if (status === "ready") {
+    nextActions.push("Proceed with the normal merge review process and confirm branch protection checks before merging.");
+  } else {
+    nextActions.push("Address the listed blockers before treating the merge request as ready.");
+  }
+
+  if (mergeRequest.draft === true) {
+    nextActions.push("Ask the author whether the draft merge request is ready for review.");
+  }
+
+  if ((mergeRequest.approvalsLeft ?? 0) > 0) {
+    nextActions.push("Request the remaining required approvals from eligible reviewers.");
+  }
+
+  if (unresolvedCount > 0) {
+    nextActions.push("Resolve or respond to the unresolved discussions that still block merge readiness.");
+  }
+
+  if (mergeRequest.headPipeline?.status === "failed") {
+    nextActions.push("Restore the failing head pipeline before approval or merge decisions.");
+  } else if (
+    typeof mergeRequest.headPipeline?.status === "string" &&
+    runningPipelineStatuses.has(mergeRequest.headPipeline.status)
+  ) {
+    nextActions.push("Wait for the running head pipeline to finish before making a final merge decision.");
+  }
+
+  if ((mergeRequest.diffStatsSummary?.fileCount ?? 0) >= 50) {
+    warnings.push("The merge request touches a large number of files; consider a focused review plan.");
+  }
 
   return {
+    summary: status === "ready"
+      ? "The merge request is ready based on sampled approvals, discussions, mergeability, and head pipeline signals."
+      : "The merge request is not ready yet based on sampled review, discussion, mergeability, or pipeline signals.",
     review_status: status,
     is_ready_for_merge: status === "ready",
+    confidence: "medium",
     blockers,
+    warnings,
+    next_actions: Array.from(new Set(nextActions)),
+    content_is_untrusted: true,
     merge_request: {
       iid: mergeRequest.iid ?? null,
       title: mergeRequest.title ?? null,
@@ -382,7 +427,8 @@ export function registerReviewStateTools(deps: ToolDeps): void {
       merge_request_iid: z.number().int().positive(),
       reviewer_limit: z.number().int().positive().max(50).optional().default(10),
       discussion_limit: z.number().int().positive().max(50).optional().default(20),
-      label_limit: z.number().int().positive().max(50).optional().default(20)
+      label_limit: z.number().int().positive().max(50).optional().default(20),
+      output_format: outputFormatSchema
     },
     handler: async (args, { requireProject }) => {
       const project = await requireProject(args.project_id);
@@ -412,14 +458,25 @@ export function registerReviewStateTools(deps: ToolDeps): void {
         throw new Error("GitLab could not find the requested merge request.");
       }
 
-      return {
+      const result = {
         source: "graphql",
         project: {
           full_path: resultProject.fullPath ?? projectPath,
           web_url: resultProject.webUrl ?? null
         },
-        ...summarizeMergeRequestReviewState(mergeRequest)
+        ...summarizeMergeRequestReviewState(mergeRequest),
+        sample_limits: {
+          reviewers: args.reviewer_limit,
+          discussions: args.discussion_limit,
+          labels: args.label_limit
+        },
+        source_links: [
+          resultProject.webUrl,
+          mergeRequest.webUrl
+        ].filter((url): url is string => typeof url === "string" && url.length > 0)
       };
+
+      return presentOutput(args.output_format, result, formatMergeRequestReviewStateMarkdown);
     }
   });
 }

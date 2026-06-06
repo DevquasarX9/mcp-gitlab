@@ -66,6 +66,14 @@ function modeSummary(config: AppConfig): string {
   return "read-only";
 }
 
+function isLocalHttpHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "[::1]";
+}
+
 export function buildTokenValidationAdvisory(
   config: AppConfig,
   personalAccessToken: JsonMap | null
@@ -76,6 +84,10 @@ export function buildTokenValidationAdvisory(
     : tokenScopes.includes("read_api") || tokenScopes.includes("api");
   const hasWriteApiScope = tokenScopes === null ? null : tokenScopes.includes("api");
   const expiryDays = daysUntil(personalAccessToken?.expires_at);
+  const hasProjectOrGroupAllowlist = config.projectAllowlist.length > 0 || config.groupAllowlist.length > 0;
+  const httpBindIsLocal = isLocalHttpHost(config.mcpHttpHost);
+  const httpNonLocalStartupBlocked = !httpBindIsLocal &&
+    (!config.mcpHttpAllowNonLocalhost || !config.mcpHttpAuthToken);
 
   const likelyBlockedCapabilities: string[] = [];
   const warnings: string[] = [];
@@ -103,6 +115,12 @@ export function buildTokenValidationAdvisory(
     likelyBlockedCapabilities.push("Projects listed in PROJECT_DENYLIST are blocked.");
   }
 
+  if (httpNonLocalStartupBlocked) {
+    likelyBlockedCapabilities.push(
+      "HTTP transport startup is blocked because non-local binding requires MCP_HTTP_ALLOW_NON_LOCALHOST=true and MCP_HTTP_AUTH_TOKEN."
+    );
+  }
+
   if (config.enableWriteTools && hasWriteApiScope === false) {
     likelyBlockedCapabilities.push(
       "Write-capable tools will likely fail because the token scopes do not include api."
@@ -124,9 +142,15 @@ export function buildTokenValidationAdvisory(
     );
   }
 
-  if (config.projectAllowlist.length === 0 && config.groupAllowlist.length === 0) {
+  if (!hasProjectOrGroupAllowlist) {
     warnings.push(
       "No project or group allowlists are configured, so accessible scope is controlled only by the GitLab token permissions."
+    );
+  }
+
+  if (config.enableWriteTools && !hasProjectOrGroupAllowlist) {
+    warnings.push(
+      "ENABLE_WRITE_TOOLS is enabled without PROJECT_ALLOWLIST or GROUP_ALLOWLIST, so any project visible to the token may be writable."
     );
   }
 
@@ -140,6 +164,30 @@ export function buildTokenValidationAdvisory(
     warnings.push(
       "ENABLE_DESTRUCTIVE_TOOLS is enabled without ENABLE_WRITE_TOOLS, so destructive actions remain inconsistent with the broader write posture."
     );
+  }
+
+  if (config.enableDestructiveTools) {
+    warnings.push(
+      "ENABLE_DESTRUCTIVE_TOOLS is enabled; destructive tools still require confirm_destructive=true but should be used only with narrow allowlists."
+    );
+  }
+
+  if (config.enableDestructiveTools && !hasProjectOrGroupAllowlist) {
+    warnings.push(
+      "Destructive tools are enabled without PROJECT_ALLOWLIST or GROUP_ALLOWLIST."
+    );
+  }
+
+  if (!httpBindIsLocal) {
+    if (httpNonLocalStartupBlocked) {
+      warnings.push(
+        "MCP_HTTP_HOST is configured outside localhost without the required non-local override and bearer token."
+      );
+    } else {
+      warnings.push(
+        "MCP_HTTP_HOST is configured outside localhost; expose it only on trusted networks with bearer auth and strict host/origin allowlists."
+      );
+    }
   }
 
   if (expiryDays !== null && expiryDays < 0) {
@@ -162,6 +210,10 @@ export function buildTokenValidationAdvisory(
     recommendedNextChecks.push(
       "Keep using read-only workflows, or enable ENABLE_WRITE_TOOLS=true only when safe-write tools are explicitly needed."
     );
+  } else if (!hasProjectOrGroupAllowlist) {
+    recommendedNextChecks.push(
+      "Configure PROJECT_ALLOWLIST or GROUP_ALLOWLIST before write-enabled sessions so agent writes stay inside reviewed targets."
+    );
   } else if (!config.enableDryRun) {
     recommendedNextChecks.push(
       "Consider enabling ENABLE_DRY_RUN=true before the first write-enabled session so intended mutations can be reviewed safely."
@@ -178,6 +230,20 @@ export function buildTokenValidationAdvisory(
     recommendedNextChecks.push(
       "Leave destructive tools disabled unless you have a narrow, reviewed need for them."
     );
+  } else {
+    recommendedNextChecks.push(
+      "Keep destructive mode temporary, scoped by allowlists, and paired with per-call confirm_destructive=true review."
+    );
+  }
+
+  if (httpNonLocalStartupBlocked) {
+    recommendedNextChecks.push(
+      "For non-local HTTP mode, set MCP_HTTP_AUTH_TOKEN, MCP_HTTP_ALLOW_NON_LOCALHOST=true, and strict MCP_HTTP_ALLOWED_HOSTS/MCP_HTTP_ALLOWED_ORIGINS."
+    );
+  } else if (!httpBindIsLocal) {
+    recommendedNextChecks.push(
+      "Review MCP_HTTP_ALLOWED_HOSTS and MCP_HTTP_ALLOWED_ORIGINS before sharing a non-local HTTP endpoint."
+    );
   }
 
   if (tokenScopes === null) {
@@ -188,6 +254,7 @@ export function buildTokenValidationAdvisory(
 
   return {
     server_mode: modeSummary(config),
+    tool_profile: config.toolProfile,
     token_kind: personalAccessToken ? "personal_access_token" : "project_group_or_oauth_token",
     scope_summary: {
       token_scopes_known: tokenScopes !== null,
@@ -195,7 +262,23 @@ export function buildTokenValidationAdvisory(
       has_read_api_scope: hasReadApiScope,
       has_write_api_scope: hasWriteApiScope
     },
+    security_posture: {
+      write_mode_without_allowlist: config.enableWriteTools && !hasProjectOrGroupAllowlist,
+      destructive_mode_enabled: config.enableDestructiveTools,
+      http_bind_is_local: httpBindIsLocal,
+      http_auth_configured: Boolean(config.mcpHttpAuthToken),
+      http_non_local_startup_blocked: httpNonLocalStartupBlocked,
+      response_caps: {
+        max_file_size_bytes: config.maxFileSizeBytes,
+        max_diff_size_bytes: config.maxDiffSizeBytes,
+        max_api_response_bytes: config.maxApiResponseBytes,
+        gitlab_http_timeout_ms: config.httpTimeoutMs
+      }
+    },
     access_controls: {
+      enabled_tool_count: config.enabledTools.length,
+      disabled_tool_count: config.disabledTools.length,
+      disabled_write_tools_exposed: config.exposeDisabledWriteTools,
       project_aliases_enabled: Object.keys(config.projectAliases).length > 0,
       group_aliases_enabled: Object.keys(config.groupAliases).length > 0,
       project_allowlist_enabled: config.projectAllowlist.length > 0,
@@ -255,6 +338,10 @@ export function registerInstanceTools(deps: ToolDeps): void {
         user: userResponse.data,
         version: versionResponse.data,
         token_header_mode: config.tokenHeaderMode,
+        tool_profile: config.toolProfile,
+        enabled_tools: config.enabledTools,
+        disabled_tools: config.disabledTools,
+        disabled_write_tools_exposed: config.exposeDisabledWriteTools,
         write_tools_enabled: config.enableWriteTools,
         destructive_tools_enabled: config.enableDestructiveTools,
         dry_run_enabled: config.enableDryRun,

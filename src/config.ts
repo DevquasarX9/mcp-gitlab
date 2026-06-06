@@ -1,11 +1,34 @@
 import { z } from "zod";
 
 const truthyValues = new Set(["1", "true", "yes", "on"]);
+const defaultHttpAllowedHosts = "localhost,127.0.0.1,[::1]";
 
 const envSchema = z.object({
   GITLAB_BASE_URL: z.string().default("https://gitlab.com"),
   GITLAB_TOKEN: z.string().min(1, "GITLAB_TOKEN is required"),
   GITLAB_TOKEN_HEADER_MODE: z.enum(["bearer", "private-token"]).default("bearer"),
+  GITLAB_MCP_TOOL_PROFILE: z.enum([
+    "full",
+    "readonly",
+    "core",
+    "mr-review",
+    "ci-triage",
+    "delivery",
+    "release",
+    "governance",
+    "maintainer-write"
+  ]).default("readonly"),
+  GITLAB_MCP_ENABLED_TOOLS: z.string().default(""),
+  GITLAB_MCP_DISABLED_TOOLS: z.string().default(""),
+  GITLAB_MCP_EXPOSE_DISABLED_WRITES: z.string().default("false"),
+  MCP_TRANSPORT: z.enum(["stdio", "http"]).default("stdio"),
+  MCP_HTTP_HOST: z.string().default("127.0.0.1"),
+  MCP_HTTP_PORT: z.string().default("3333"),
+  MCP_HTTP_PATH: z.string().default("/mcp"),
+  MCP_HTTP_ALLOWED_ORIGINS: z.string().default(""),
+  MCP_HTTP_ALLOWED_HOSTS: z.string().default(defaultHttpAllowedHosts),
+  MCP_HTTP_AUTH_TOKEN: z.string().optional(),
+  MCP_HTTP_ALLOW_NON_LOCALHOST: z.string().default("false"),
   ENABLE_WRITE_TOOLS: z.string().default("false"),
   ENABLE_DESTRUCTIVE_TOOLS: z.string().default("false"),
   ENABLE_DRY_RUN: z.string().default("false"),
@@ -26,12 +49,35 @@ const envSchema = z.object({
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type TokenHeaderMode = "bearer" | "private-token";
+export type McpTransportMode = "stdio" | "http";
 export type AliasMap = Readonly<Record<string, string>>;
+export type ToolProfile =
+  | "full"
+  | "readonly"
+  | "core"
+  | "mr-review"
+  | "ci-triage"
+  | "delivery"
+  | "release"
+  | "governance"
+  | "maintainer-write";
 
 export interface AppConfig {
   readonly gitlabBaseUrl: string;
   readonly gitlabToken: string;
   readonly tokenHeaderMode: TokenHeaderMode;
+  readonly toolProfile: ToolProfile;
+  readonly enabledTools: readonly string[];
+  readonly disabledTools: readonly string[];
+  readonly exposeDisabledWriteTools: boolean;
+  readonly mcpTransport: McpTransportMode;
+  readonly mcpHttpHost: string;
+  readonly mcpHttpPort: number;
+  readonly mcpHttpPath: string;
+  readonly mcpHttpAllowedOrigins: readonly string[];
+  readonly mcpHttpAllowedHosts: readonly string[];
+  readonly mcpHttpAuthToken?: string;
+  readonly mcpHttpAllowNonLocalhost: boolean;
   readonly enableWriteTools: boolean;
   readonly enableDestructiveTools: boolean;
   readonly enableDryRun: boolean;
@@ -57,6 +103,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     gitlabBaseUrl: normalizeGitLabBaseUrl(parsed.GITLAB_BASE_URL),
     gitlabToken: parsed.GITLAB_TOKEN.trim(),
     tokenHeaderMode: parsed.GITLAB_TOKEN_HEADER_MODE,
+    toolProfile: parsed.GITLAB_MCP_TOOL_PROFILE,
+    enabledTools: parseCsvList(parsed.GITLAB_MCP_ENABLED_TOOLS),
+    disabledTools: parseCsvList(parsed.GITLAB_MCP_DISABLED_TOOLS),
+    exposeDisabledWriteTools: parseBoolean(parsed.GITLAB_MCP_EXPOSE_DISABLED_WRITES),
+    mcpTransport: parsed.MCP_TRANSPORT,
+    mcpHttpHost: parsed.MCP_HTTP_HOST.trim(),
+    mcpHttpPort: parsePort(parsed.MCP_HTTP_PORT, "MCP_HTTP_PORT"),
+    mcpHttpPath: normalizeHttpPath(parsed.MCP_HTTP_PATH),
+    mcpHttpAllowedOrigins: parseCsvList(parsed.MCP_HTTP_ALLOWED_ORIGINS),
+    mcpHttpAllowedHosts: parseCsvList(parsed.MCP_HTTP_ALLOWED_HOSTS),
+    mcpHttpAuthToken: parsed.MCP_HTTP_AUTH_TOKEN?.trim() || undefined,
+    mcpHttpAllowNonLocalhost: parseBoolean(parsed.MCP_HTTP_ALLOW_NON_LOCALHOST),
     enableWriteTools: parseBoolean(parsed.ENABLE_WRITE_TOOLS),
     enableDestructiveTools: parseBoolean(parsed.ENABLE_DESTRUCTIVE_TOOLS),
     enableDryRun: parseBoolean(parsed.ENABLE_DRY_RUN),
@@ -132,4 +190,24 @@ function parsePositiveInt(value: string, name: string): number {
   }
 
   return parsed;
+}
+
+function parsePort(value: string, name: string): number {
+  const parsed = parsePositiveInt(value, name);
+
+  if (parsed > 65535) {
+    throw new Error(`${name} must be between 1 and 65535`);
+  }
+
+  return parsed;
+}
+
+function normalizeHttpPath(value: string): string {
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("/") || trimmed.includes("?") || trimmed.includes("#")) {
+    throw new Error("MCP_HTTP_PATH must start with / and cannot include query strings or fragments");
+  }
+
+  return trimmed.replace(/\/+$/, "") || "/";
 }

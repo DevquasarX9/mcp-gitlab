@@ -128,6 +128,42 @@ interface MergeRequestDiscussionPage {
   };
 }
 
+export function buildMergeRequestCommitsRequest(args: {
+  readonly project_id: string;
+  readonly merge_request_iid: number;
+  readonly page?: number;
+  readonly per_page?: number;
+}): {
+  readonly path: string;
+  readonly query: Record<string, string | number | boolean | readonly string[]>;
+} {
+  return {
+    path: `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/commits`,
+    query: cleanQuery({
+      page: args.page,
+      per_page: args.per_page
+    })
+  };
+}
+
+export function buildMergeRequestPipelinesRequest(args: {
+  readonly project_id: string;
+  readonly merge_request_iid: number;
+  readonly page?: number;
+  readonly per_page?: number;
+}): {
+  readonly path: string;
+  readonly query: Record<string, string | number | boolean | readonly string[]>;
+} {
+  return {
+    path: `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/pipelines`,
+    query: cleanQuery({
+      page: args.page,
+      per_page: args.per_page
+    })
+  };
+}
+
 export async function collectMergeRequestDiscussions(
   client: Pick<ToolDeps["client"], "getJson">,
   args: {
@@ -255,6 +291,57 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
       );
 
       return response.data;
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_get_merge_request_commits",
+    title: "Get Merge Request Commits",
+    description: "List commits that are part of a merge request.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      page: z.number().int().positive().optional(),
+      per_page: z.number().int().positive().max(100).optional()
+    },
+    handler: async (args, { client, requireProject }) => {
+      await requireProject(args.project_id);
+      const request = buildMergeRequestCommitsRequest(args);
+      const response = await client.getJson<JsonMap[]>(request.path, {
+        query: request.query
+      });
+
+      return {
+        items: response.data,
+        pagination: response.pagination,
+        content_is_untrusted: true
+      };
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_get_merge_request_pipelines",
+    title: "Get Merge Request Pipelines",
+    description: "List pipelines associated with a merge request.",
+    safety: "read-only",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      page: z.number().int().positive().optional(),
+      per_page: z.number().int().positive().max(100).optional()
+    },
+    handler: async (args, { client, requireProject }) => {
+      await requireProject(args.project_id);
+      const request = buildMergeRequestPipelinesRequest(args);
+      const response = await client.getJson<JsonMap[]>(request.path, {
+        query: request.query
+      });
+
+      return {
+        items: response.data,
+        pagination: response.pagination
+      };
     }
   });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { formatGroupDeliveryOverviewMarkdown } from "../src/tools/output.js";
 import { summarizeGroupDeliveryOverview } from "../src/tools/groupDeliveryOverview.js";
 
 describe("summarizeGroupDeliveryOverview", () => {
@@ -141,6 +142,15 @@ describe("summarizeGroupDeliveryOverview", () => {
     });
 
     expect(summary.delivery_status).toBe("healthy");
+    expect(summary.summary).toBe(
+      "The sampled group delivery data looks healthy based on current project, merge request, and issue signals."
+    );
+    expect(summary.confidence).toBe("medium");
+    expect(summary.next_actions).toContain(
+      "Share the group delivery overview and keep monitoring sampled projects, merge requests, and issues."
+    );
+    expect(summary.content_is_untrusted).toBe(true);
+    expect(summary.source_links).toEqual(["https://gitlab.example.com/groups/group/platform"]);
     expect(summary.health_reasons).toEqual([]);
     expect(summary.sample_insights).toMatchObject({
       projects_needing_attention: 0,
@@ -281,6 +291,9 @@ describe("summarizeGroupDeliveryOverview", () => {
     });
 
     expect(summary.delivery_status).toBe("needs_attention");
+    expect(summary.summary).toBe(
+      "The sampled group delivery data shows concrete risks that should be addressed before treating this as a clean status."
+    );
     expect(summary.health_reasons).toContain("Sampled group projects include delivery risks.");
     expect(summary.health_reasons).toContain(
       "Open group merge request sample includes items needing attention."
@@ -293,6 +306,21 @@ describe("summarizeGroupDeliveryOverview", () => {
       unassigned_issues: 1,
       overdue_issues: 1
     });
+    expect(summary.signals).toMatchObject({
+      project_count: 2,
+      open_merge_request_count: 5,
+      open_issue_count: 9,
+      projects_needing_attention_count: 1
+    });
+    expect(summary.next_actions).toContain(
+      "Review the sampled projects with delivery risks before broad group status reporting."
+    );
+    expect(summary.next_actions).toContain(
+      "Unblock highlighted merge requests that are blocked, missing approvals, or failing CI."
+    );
+    expect(summary.next_actions).toContain(
+      "Assign or reprioritize highlighted open issues that are unassigned or overdue."
+    );
   });
 
   it("does not treat archived sampled projects as active delivery risk", () => {
@@ -386,5 +414,71 @@ describe("summarizeGroupDeliveryOverview", () => {
         attention_reasons: []
       })
     ]);
+  });
+
+  it("renders a markdown group delivery overview", () => {
+    const markdown = formatGroupDeliveryOverviewMarkdown({
+      delivery_status: "needs_attention",
+      confidence: "medium",
+      summary: "The sampled group delivery data shows concrete risks.",
+      group: {
+        full_path: "group/apps"
+      },
+      counts: {
+        projects: 2,
+        open_merge_requests: 5,
+        open_issues: 9
+      },
+      sample_window: {
+        projects: 1,
+        merge_requests: 1,
+        issues: 1
+      },
+      sample_limits: {
+        projects: 5,
+        merge_requests: 5,
+        issues: 5
+      },
+      sample_insights: {
+        projects_needing_attention: 1,
+        merge_requests_needing_attention: 1,
+        unassigned_issues: 1,
+        overdue_issues: 1
+      },
+      health_reasons: [
+        "Sampled group projects include delivery risks."
+      ],
+      highlights: {
+        projects_needing_attention: [
+          {
+            full_path: "group/apps/web",
+            delivery_status: "needs_attention",
+            attention_reasons: ["Latest project pipeline sample includes failures."]
+          }
+        ],
+        merge_requests_needing_attention: [
+          {
+            iid: "81",
+            title: "Needs review"
+          }
+        ],
+        unassigned_issues: [
+          {
+            reference: "#91",
+            title: "Unassigned bug"
+          }
+        ]
+      },
+      next_actions: [
+        "Review the sampled projects with delivery risks before broad group status reporting."
+      ]
+    });
+
+    expect(markdown).toContain("# Group Delivery Overview: group/apps");
+    expect(markdown).toContain("Delivery status: needs_attention");
+    expect(markdown).toContain("Sampled projects: 1 / limit 5");
+    expect(markdown).toContain("group/apps/web [needs_attention] - Latest project pipeline sample includes failures.");
+    expect(markdown).toContain("!81: Needs review");
+    expect(markdown).toContain("#91: Unassigned bug");
   });
 });

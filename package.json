@@ -29,6 +29,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "docs:check-secrets": "node scripts/check-doc-secrets.mjs",
+    "smoke:stdio": "node scripts/smoke-stdio.mjs",
+    "smoke:http": "node scripts/smoke-http.mjs",
+    "smoke:package": "node scripts/smoke-package.mjs",
+    "smoke:source": "npm run build && npm run smoke:stdio && npm run smoke:http",
+    "release:check": "npm run typecheck && npm test && npm run docs:check-secrets && npm run build && npm run smoke:stdio && npm run smoke:http && npm run pack:dry-run",
     "prepack": "npm run clean && npm run build",
     "pack:dry-run": "npm pack --dry-run"
   },
