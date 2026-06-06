@@ -49,6 +49,8 @@ Write operations require:
 3. Minimum GitLab access level check in-server
 4. GitLab API permission check on execution
 
+Write mode is only the MCP server-side feature gate. It does not expand the configured GitLab credential. If a write tool reaches GitLab and returns `insufficient_scope`, the MCP write guard has already passed and the token itself lacks the required GitLab scope, usually `api` for write-capable REST or GraphQL operations.
+
 Destructive operations require:
 
 1. Destructive mode enabled

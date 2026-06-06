@@ -26,6 +26,12 @@ That report confirms:
 - allowlists, denylist, and alias counts
 - likely blocked capabilities and recommended next checks
 
+Important write-mode distinction:
+
+- `ENABLE_WRITE_TOOLS=true` only opens the MCP server's write-tool guard.
+- Normal GitLab writes still require a write-capable GitLab token and project permission.
+- If write tools return `insufficient_scope`, tell the user the MCP write guard is no longer blocking them; the configured GitLab credential is missing the required scope, usually `api`.
+
 Optional aliases for any client:
 
 ```bash
