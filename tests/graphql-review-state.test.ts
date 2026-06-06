@@ -6,6 +6,7 @@ import {
   buildUserFacingError,
   normalizeGitLabGraphQLError
 } from "../src/gitlab/errors.js";
+import { formatMergeRequestReviewStateMarkdown } from "../src/tools/output.js";
 import { summarizeMergeRequestReviewState } from "../src/tools/reviewState.js";
 
 describe("GitLab GraphQL helpers", () => {
@@ -98,8 +99,16 @@ describe("summarizeMergeRequestReviewState", () => {
     });
 
     expect(summary.review_status).toBe("ready");
+    expect(summary.summary).toBe(
+      "The merge request is ready based on sampled approvals, discussions, mergeability, and head pipeline signals."
+    );
+    expect(summary.confidence).toBe("medium");
     expect(summary.is_ready_for_merge).toBe(true);
+    expect(summary.content_is_untrusted).toBe(true);
     expect(summary.blockers).toEqual([]);
+    expect(summary.next_actions).toContain(
+      "Proceed with the normal merge review process and confirm branch protection checks before merging."
+    );
     expect(summary.reviewers).toHaveLength(1);
     expect((summary.approvals as Record<string, unknown>).approved_by).toHaveLength(1);
   });
@@ -137,10 +146,59 @@ describe("summarizeMergeRequestReviewState", () => {
     });
 
     expect(summary.review_status).toBe("awaiting_approvals");
+    expect(summary.summary).toBe(
+      "The merge request is not ready yet based on sampled review, discussion, mergeability, or pipeline signals."
+    );
     expect(summary.is_ready_for_merge).toBe(false);
     expect(summary.blockers).toContain("1 required approval(s) are still missing.");
     expect(summary.blockers).toContain("Head pipeline is failing.");
     expect(summary.blockers).toContain("3 resolvable discussion(s) remain unresolved.");
     expect(summary.blockers).toContain("GitLab merge status is NOT_APPROVED.");
+    expect(summary.next_actions).toContain("Address the listed blockers before treating the merge request as ready.");
+    expect(summary.next_actions).toContain("Request the remaining required approvals from eligible reviewers.");
+    expect(summary.next_actions).toContain("Resolve or respond to the unresolved discussions that still block merge readiness.");
+    expect(summary.next_actions).toContain("Restore the failing head pipeline before approval or merge decisions.");
+  });
+
+  it("renders review-state markdown", () => {
+    const markdown = formatMergeRequestReviewStateMarkdown({
+      project: {
+        full_path: "group/project"
+      },
+      merge_request: {
+        iid: "13",
+        title: "Needs more work"
+      },
+      review_status: "awaiting_approvals",
+      is_ready_for_merge: false,
+      confidence: "medium",
+      summary: "The merge request is not ready yet.",
+      approvals: {
+        approvals_left: 1
+      },
+      discussion_status: {
+        unresolved_discussions_count: 3
+      },
+      diff_stats: {
+        file_count: 4
+      },
+      head_pipeline: {
+        status: "failed"
+      },
+      blockers: [
+        "1 required approval(s) are still missing.",
+        "Head pipeline is failing."
+      ],
+      warnings: [],
+      next_actions: [
+        "Request the remaining required approvals from eligible reviewers."
+      ]
+    });
+
+    expect(markdown).toContain("# Merge Request Review State: !13");
+    expect(markdown).toContain("Review status: awaiting_approvals");
+    expect(markdown).toContain("Ready for merge: no");
+    expect(markdown).toContain("Head pipeline is failing.");
+    expect(markdown).toContain("Request the remaining required approvals from eligible reviewers.");
   });
 });

@@ -5,6 +5,7 @@ Use the raw config examples in this folder as the source of truth for MCP wiring
 - [Claude Desktop JSON](./claude_desktop_config.json)
 - [Codex TOML](./codex-config.toml)
 - [Cursor JSON](./cursor.mcp.json)
+- [HTTP transport guide](./http.md)
 
 For Claude Code, use the dedicated guide:
 
@@ -24,6 +25,7 @@ That report confirms:
 - read-only, write-enabled, or destructive-enabled posture
 - token scope visibility when PAT introspection is available
 - allowlists, denylist, and alias counts
+- HTTP bind posture and payload limits
 - likely blocked capabilities and recommended next checks
 
 Important write-mode distinction:
@@ -88,6 +90,10 @@ Use gitlab_explain_failed_pipeline_workflow for project_id="platform-api" and pi
 ```text
 Use gitlab_flaky_ci_triage_workflow for project_id="platform-api" and ref="main".
 ```
+
+## HTTP Clients
+
+Use [http.md](./http.md) for clients that connect to a Streamable HTTP MCP URL, including VS Code, Claude Code HTTP mode, Cursor URL-based setup, and OpenAI Agents SDK integrations.
 
 ## Shareable Results
 

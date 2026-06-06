@@ -13,6 +13,11 @@ import {
   type GraphQLDashboardPipeline
 } from "./deliveryShared.js";
 import { requireAllowedGroup } from "./groups.js";
+import {
+  formatGroupDeliveryOverviewMarkdown,
+  outputFormatSchema,
+  presentOutput
+} from "./output.js";
 import { registerTool, type ToolDeps } from "./shared.js";
 
 interface GraphQLGroupProject {
@@ -301,8 +306,33 @@ export function summarizeGroupDeliveryOverview(group: GraphQLGroupOverview): Jso
     healthReasons.push("Open group issue sample includes overdue issues.");
   }
 
+  const deliveryStatus = healthReasons.length > 0 ? "needs_attention" : "healthy";
+  const nextActions: string[] = [];
+
+  if (projectsNeedingAttention.length > 0) {
+    nextActions.push("Review the sampled projects with delivery risks before broad group status reporting.");
+  }
+
+  if (mergeRequestsNeedingAttention.length > 0) {
+    nextActions.push("Unblock highlighted merge requests that are blocked, missing approvals, or failing CI.");
+  }
+
+  if (unassignedIssues.length > 0 || overdueIssues.length > 0) {
+    nextActions.push("Assign or reprioritize highlighted open issues that are unassigned or overdue.");
+  }
+
+  if (nextActions.length === 0) {
+    nextActions.push("Share the group delivery overview and keep monitoring sampled projects, merge requests, and issues.");
+  }
+
   return {
-    delivery_status: healthReasons.length > 0 ? "needs_attention" : "healthy",
+    summary: deliveryStatus === "needs_attention"
+      ? "The sampled group delivery data shows concrete risks that should be addressed before treating this as a clean status."
+      : "The sampled group delivery data looks healthy based on current project, merge request, and issue signals.",
+    delivery_status: deliveryStatus,
+    confidence: projects.length > 0 || mergeRequests.length > 0 || issues.length > 0 ? "medium" : "low",
+    next_actions: nextActions,
+    content_is_untrusted: true,
     group: {
       id: group.id ?? null,
       name: group.name ?? null,
@@ -326,7 +356,20 @@ export function summarizeGroupDeliveryOverview(group: GraphQLGroupOverview): Jso
       unassigned_issues: unassignedIssues.length,
       overdue_issues: overdueIssues.length
     },
+    signals: {
+      project_count: group.projects?.count ?? 0,
+      open_merge_request_count: group.mergeRequests?.count ?? 0,
+      open_issue_count: group.issues?.count ?? 0,
+      projects_needing_attention_count: projectsNeedingAttention.length,
+      merge_requests_needing_attention_count: mergeRequestsNeedingAttention.length,
+      unassigned_issue_count: unassignedIssues.length,
+      overdue_issue_count: overdueIssues.length
+    },
     health_reasons: healthReasons,
+    warnings: healthReasons,
+    source_links: [
+      group.webUrl
+    ].filter((url): url is string => typeof url === "string" && url.length > 0),
     highlights: {
       projects_needing_attention: projectsNeedingAttention,
       merge_requests_needing_attention: mergeRequestsNeedingAttention,
@@ -356,7 +399,8 @@ export function registerGroupDeliveryOverviewTools(deps: ToolDeps): void {
       merge_request_limit: z.number().int().positive().max(20).optional().default(5),
       issue_limit: z.number().int().positive().max(20).optional().default(5),
       project_nested_limit: z.number().int().positive().max(3).optional().default(1),
-      assignee_limit: z.number().int().positive().max(10).optional().default(3)
+      assignee_limit: z.number().int().positive().max(10).optional().default(3),
+      output_format: outputFormatSchema
     },
     handler: async (args) => {
       const group = await requireAllowedGroup(args.group_id, deps);
@@ -384,10 +428,19 @@ export function registerGroupDeliveryOverviewTools(deps: ToolDeps): void {
         throw new Error("GitLab could not find the requested group.");
       }
 
-      return {
+      const result = {
         source: "graphql",
-        ...summarizeGroupDeliveryOverview(resultGroup)
+        ...summarizeGroupDeliveryOverview(resultGroup),
+        sample_limits: {
+          projects: args.project_limit,
+          merge_requests: args.merge_request_limit,
+          issues: args.issue_limit,
+          nested_items_per_project: args.project_nested_limit,
+          assignees_per_issue: args.assignee_limit
+        }
       };
+
+      return presentOutput(args.output_format, result, formatGroupDeliveryOverviewMarkdown);
     }
   });
 }

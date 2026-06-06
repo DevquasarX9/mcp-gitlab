@@ -7,12 +7,14 @@ import { buildUserFacingError, GuardrailError } from "../gitlab/errors.js";
 import type { JsonMap } from "../gitlab/types.js";
 import {
   ACCESS_LEVEL,
+  assertGroupAllowed,
   assertDestructiveEnabled,
   assertProjectAllowed,
   assertWriteEnabled,
   type SafetyLevel
 } from "../security/guards.js";
 import { toolFailure, toolSuccess } from "../utils/result.js";
+import { inferToolCategory, shouldRegisterTool, type ToolCategory } from "./profiles.js";
 
 export interface ToolDeps {
   readonly server: McpServer;
@@ -34,6 +36,8 @@ interface ToolDefinition<TSchema extends z.ZodRawShape> {
   readonly title: string;
   readonly description: string;
   readonly safety: SafetyLevel;
+  readonly category?: ToolCategory;
+  readonly profiles?: readonly AppConfig["toolProfile"][];
   readonly inputSchema: TSchema;
   readonly handler: (
     args: z.output<z.ZodObject<TSchema>>,
@@ -45,6 +49,21 @@ export function registerTool<TSchema extends z.ZodRawShape>(
   deps: ToolDeps,
   definition: ToolDefinition<TSchema>
 ): void {
+  const category = definition.category ?? inferToolCategory(definition.name);
+  const decision = shouldRegisterTool(
+    {
+      name: definition.name,
+      safety: definition.safety,
+      category,
+      profiles: definition.profiles
+    },
+    deps.config
+  );
+
+  if (!decision.register) {
+    return;
+  }
+
   deps.server.registerTool(
     definition.name,
     {
@@ -84,7 +103,9 @@ export function registerTool<TSchema extends z.ZodRawShape>(
             deps.config.groupAliases,
             "group"
           );
-          return getGroup(deps.client, resolvedGroupId);
+          const group = await getGroup(deps.client, resolvedGroupId);
+          assertGroupAllowed(deps.config, group);
+          return group;
         }
       };
 
@@ -221,7 +242,7 @@ export function assertDeveloperAccess(project: JsonMap): void {
   }
 }
 
-export function paginateResult<T>(items: readonly T[], pagination: JsonMap): JsonMap {
+export function paginateResult<T>(items: readonly T[], pagination: unknown): JsonMap {
   return {
     items,
     pagination

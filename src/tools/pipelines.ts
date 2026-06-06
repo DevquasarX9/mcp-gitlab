@@ -3,6 +3,12 @@ import { z } from "zod";
 import type { JsonMap } from "../gitlab/types.js";
 import { stripUnsafeText } from "../security/guards.js";
 import {
+  formatJobTraceMarkdown,
+  formatPipelineComparisonMarkdown,
+  outputFormatSchema,
+  presentOutput
+} from "./output.js";
+import {
   assertDeveloperAccess,
   assertMaintainerAccess,
   cleanQuery,
@@ -32,10 +38,26 @@ function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function asList(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function pipelineJobKey(job: JsonMap): string {
   const stage = asString(job.stage) ?? "unknown";
   const name = asString(job.name) ?? "unnamed";
   return `${stage}:${name}`;
+}
+
+function sourceLink(label: string, url: unknown): JsonMap | null {
+  if (typeof url !== "string" || url.length === 0) {
+    return null;
+  }
+
+  return { label, url };
+}
+
+function compactSourceLinks(items: readonly (JsonMap | null)[]): readonly JsonMap[] {
+  return items.filter((item): item is JsonMap => item !== null);
 }
 
 function classifyJobOutcome(status: string | null): "success" | "failure" | null {
@@ -183,6 +205,135 @@ export function comparePipelineJobSets(
     removed_jobs: removedJobs,
     status_changes: statusChanges,
     duration_changes: durationChanges
+  };
+}
+
+export function buildPipelineComparisonResult(args: {
+  readonly leftPipeline: JsonMap;
+  readonly rightPipeline: JsonMap;
+  readonly comparison: JsonMap;
+  readonly leftJobSampleCount: number;
+  readonly rightJobSampleCount: number;
+  readonly leftHasMoreJobs: boolean;
+  readonly rightHasMoreJobs: boolean;
+}): JsonMap {
+  const addedJobCount = asList(args.comparison.added_jobs).length;
+  const removedJobCount = asList(args.comparison.removed_jobs).length;
+  const statusChangeCount = asList(args.comparison.status_changes).length;
+  const durationChangeCount = asList(args.comparison.duration_changes).length;
+  const materialChangeCount = addedJobCount + removedJobCount + statusChangeCount;
+  const comparisonStatus = materialChangeCount > 0
+    ? "changed"
+    : durationChangeCount > 0
+      ? "duration_changed"
+      : "unchanged";
+  const warnings: string[] = [];
+
+  if (args.leftHasMoreJobs || args.rightHasMoreJobs) {
+    warnings.push("Only the first 100 non-retried jobs from each pipeline were compared.");
+  }
+
+  const nextActions = materialChangeCount > 0
+    ? [
+        "Review jobs with status changes before treating the newer pipeline as equivalent.",
+        "Check added or removed jobs for intentional CI configuration changes."
+      ]
+    : durationChangeCount > 0
+      ? ["Review the largest duration changes for possible performance regressions."]
+      : ["No material job-set or status changes were found in the sampled jobs."];
+
+  return {
+    summary: `Compared pipelines ${asNumber(args.leftPipeline.id) ?? "left"} and ${asNumber(args.rightPipeline.id) ?? "right"}: ${addedJobCount} added, ${removedJobCount} removed, ${statusChangeCount} status changes, ${durationChangeCount} duration changes.`,
+    comparison_status: comparisonStatus,
+    confidence: args.leftHasMoreJobs || args.rightHasMoreJobs ? "medium" : "high",
+    sample_limits: {
+      jobs_per_pipeline: 100,
+      include_retried: false
+    },
+    signals: {
+      left_job_sample_count: args.leftJobSampleCount,
+      right_job_sample_count: args.rightJobSampleCount,
+      added_job_count: addedJobCount,
+      removed_job_count: removedJobCount,
+      status_change_count: statusChangeCount,
+      duration_change_count: durationChangeCount
+    },
+    warnings,
+    next_actions: nextActions,
+    source_links: compactSourceLinks([
+      sourceLink("left_pipeline", args.leftPipeline.web_url),
+      sourceLink("right_pipeline", args.rightPipeline.web_url)
+    ]),
+    content_is_untrusted: true,
+    left_pipeline: args.leftPipeline,
+    right_pipeline: args.rightPipeline,
+    comparison: args.comparison
+  };
+}
+
+export function buildJobTraceContextResult(args: {
+  readonly job: JsonMap;
+  readonly pipeline: JsonMap | null;
+  readonly commit: JsonMap | null;
+  readonly mergeRequests: readonly JsonMap[];
+}): JsonMap {
+  const jobName = asString(args.job.name) ?? `job ${asNumber(args.job.id) ?? "unknown"}`;
+  const commitSha = args.commit ? asString(args.commit.id) : null;
+  const shortCommitSha = args.commit ? asString(args.commit.short_id) : null;
+  const pipelineId = args.pipeline ? asNumber(args.pipeline.id) : null;
+  const relatedMergeRequestCount = args.mergeRequests.length;
+  const traceStatus = relatedMergeRequestCount > 0
+    ? "linked_to_merge_request"
+    : commitSha
+      ? "commit_without_merge_request"
+      : "job_without_commit";
+  const warnings: string[] = [];
+
+  if (!args.pipeline) {
+    warnings.push("GitLab did not return expanded pipeline details for the job.");
+  }
+
+  if (!args.commit) {
+    warnings.push("The job response did not include commit metadata.");
+  }
+
+  if (relatedMergeRequestCount === 0 && commitSha) {
+    warnings.push("No related merge requests were found for the job commit.");
+  }
+
+  const nextActions = relatedMergeRequestCount > 0
+    ? ["Inspect the related merge request before changing the pipeline or commit."]
+    : commitSha
+      ? ["Use the commit SHA to inspect branch, tag, or detached pipeline context."]
+      : ["Inspect the job and pipeline metadata directly because no commit link was available."];
+
+  return {
+    summary: `${jobName} traced to ${pipelineId === null ? "an unknown pipeline" : `pipeline ${pipelineId}`} and ${commitSha ? `commit ${shortCommitSha ?? commitSha}` : "no commit"} with ${relatedMergeRequestCount} related merge requests.`,
+    trace_status: traceStatus,
+    confidence: args.commit || args.pipeline ? "medium" : "low",
+    signals: {
+      job_id: asNumber(args.job.id),
+      job_status: asString(args.job.status),
+      pipeline_id: pipelineId,
+      pipeline_status: args.pipeline ? asString(args.pipeline.status) : null,
+      commit_sha: commitSha,
+      related_merge_request_count: relatedMergeRequestCount
+    },
+    warnings,
+    next_actions: nextActions,
+    source_links: compactSourceLinks([
+      sourceLink("job", args.job.web_url),
+      sourceLink("pipeline", args.pipeline?.web_url),
+      sourceLink("commit", args.commit?.web_url),
+      ...args.mergeRequests.slice(0, 10).map((mergeRequest) =>
+        sourceLink(`merge_request_${asNumber(mergeRequest.iid) ?? asNumber(mergeRequest.id) ?? "unknown"}`, mergeRequest.web_url)
+      )
+    ]),
+    content_is_untrusted: true,
+    job: args.job,
+    pipeline: args.pipeline,
+    commit: args.commit,
+    merge_requests: args.mergeRequests
   };
 }
 
@@ -615,7 +766,8 @@ export function registerPipelineTools(deps: ToolDeps): void {
     inputSchema: {
       project_id: z.string().trim().min(1),
       left_pipeline_id: z.number().int().positive(),
-      right_pipeline_id: z.number().int().positive()
+      right_pipeline_id: z.number().int().positive(),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       await requireProject(args.project_id);
@@ -647,11 +799,17 @@ export function registerPipelineTools(deps: ToolDeps): void {
         )
       ]);
 
-      return {
-        left_pipeline: leftPipeline.data,
-        right_pipeline: rightPipeline.data,
-        comparison: comparePipelineJobSets(leftJobs.data, rightJobs.data)
-      };
+      const result = buildPipelineComparisonResult({
+        leftPipeline: leftPipeline.data,
+        rightPipeline: rightPipeline.data,
+        comparison: comparePipelineJobSets(leftJobs.data, rightJobs.data),
+        leftJobSampleCount: leftJobs.data.length,
+        rightJobSampleCount: rightJobs.data.length,
+        leftHasMoreJobs: leftJobs.pagination.nextPage !== undefined,
+        rightHasMoreJobs: rightJobs.pagination.nextPage !== undefined
+      });
+
+      return presentOutput(args.output_format, result, formatPipelineComparisonMarkdown);
     }
   });
 
@@ -744,7 +902,8 @@ export function registerPipelineTools(deps: ToolDeps): void {
     safety: "read-only",
     inputSchema: {
       project_id: z.string().trim().min(1),
-      job_id: z.number().int().positive()
+      job_id: z.number().int().positive(),
+      output_format: outputFormatSchema
     },
     handler: async (args, { client, requireProject }) => {
       await requireProject(args.project_id);
@@ -781,12 +940,14 @@ export function registerPipelineTools(deps: ToolDeps): void {
               .then((response) => response.data)
       ]);
 
-      return {
+      const result = buildJobTraceContextResult({
         job,
         pipeline: pipelineDetails,
         commit,
-        merge_requests: mergeRequests
-      };
+        mergeRequests
+      });
+
+      return presentOutput(args.output_format, result, formatJobTraceMarkdown);
     }
   });
 }

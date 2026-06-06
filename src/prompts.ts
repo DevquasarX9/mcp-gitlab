@@ -15,6 +15,16 @@ function userMessage(text: string): { role: "user"; content: { type: "text"; tex
   };
 }
 
+function workflowGuidance(profile: string): readonly string[] {
+  return [
+    "",
+    "Workflow guidance:",
+    `- Recommended tool profile: ${profile}.`,
+    "- Prefer structured outputs with summary, status or risk_level, confidence, blockers, warnings, next_actions, and source_links.",
+    "- Use output_format=\"markdown\" only when the result is meant to be pasted into chat, an issue, or a merge request comment."
+  ];
+}
+
 export function registerPromptTools(server: McpServer): void {
   server.registerPrompt(
     "gitlab_review_merge_request_workflow",
@@ -39,6 +49,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Review GitLab merge request !${merge_request_iid} in project "${project_id}" objectively.`,
             `Focus: ${focus ?? "general correctness, delivery risk, approval state, and merge readiness"}.`,
+            ...workflowGuidance("mr-review"),
             "",
             "Use these tools as needed:",
             "- gitlab_get_merge_request",
@@ -84,6 +95,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Explain why pipeline ${pipeline_id} failed in project "${project_id}".`,
             `Investigation goal: ${investigation_goal ?? "identify the root cause, likely owner, and next remediation steps"}.`,
+            ...workflowGuidance("ci-triage"),
             "",
             "Use these tools as needed:",
             "- gitlab_get_pipeline",
@@ -127,6 +139,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Summarize the current delivery status of project "${project_id}".`,
             `Recent activity window: ${days ?? "7"} days.`,
+            ...workflowGuidance("delivery"),
             "",
             "Use these tools as needed:",
             "- gitlab_get_project_dashboard",
@@ -186,6 +199,7 @@ export function registerPromptTools(server: McpServer): void {
             lines([
               `Generate a weekly delivery summary for ${scope_type} "${scope_id}".`,
               `Reporting window: ${days ?? "7"} days.`,
+              ...workflowGuidance("delivery"),
               "",
               "Use these tools as needed:",
               ...(scope_type === "project" ? projectTools : groupTools),
@@ -219,6 +233,7 @@ export function registerPromptTools(server: McpServer): void {
         userMessage(
           lines([
             `Assess whether project "${project_id}" is safe for AI-assisted write actions.`,
+            ...workflowGuidance("governance"),
             "",
             "Use these tools as needed:",
             "- gitlab_validate_token",
@@ -267,6 +282,7 @@ export function registerPromptTools(server: McpServer): void {
             `Review stale merge requests in project "${project_id}".`,
             `Staleness threshold: ${stale_after_days ?? "14"} days.`,
             `Include drafts: ${include_drafts ?? "no"}.`,
+            ...workflowGuidance("mr-review"),
             "",
             "Use these tools as needed:",
             "- gitlab_stale_merge_request_cleanup",
@@ -314,6 +330,7 @@ export function registerPromptTools(server: McpServer): void {
             `Investigate flaky CI behavior in project "${project_id}".`,
             `Ref focus: ${ref ?? "all relevant refs"}.`,
             `Investigation window: ${investigation_window ?? "recent pipeline history"}.`,
+            ...workflowGuidance("ci-triage"),
             "",
             "Use these tools as needed:",
             "- gitlab_flaky_ci_triage",
@@ -364,6 +381,7 @@ export function registerPromptTools(server: McpServer): void {
             `Assess release readiness for project "${project_id}".`,
             `Target ref: ${target_ref ?? "default branch or current release target"}.`,
             `Release goal: ${release_goal ?? "general release readiness"}.`,
+            ...workflowGuidance("release"),
             "",
             "Use these tools as needed:",
             "- gitlab_release_readiness_check",
@@ -411,6 +429,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Generate a team delivery digest for ${scope_type} "${scope_id}".`,
             `Reporting window: ${days ?? "7"} days.`,
+            ...workflowGuidance("delivery"),
             "",
             "Use these tools as needed:",
             ...(scope_type === "project"
@@ -467,6 +486,7 @@ export function registerPromptTools(server: McpServer): void {
             `Assess cross-project delivery health for group "${group_id}".`,
             `Sampled project limit: ${project_limit ?? "5"}.`,
             `Focus: ${focus ?? "overall delivery health, pipeline breakage, stale review queues, and project hotspots"}.`,
+            ...workflowGuidance("delivery"),
             "",
             "Use these tools as needed:",
             "- gitlab_portfolio_delivery_overview",
@@ -515,6 +535,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Summarize what changed in project "${project_id}" from "${from_ref}" to "${to_ref ?? "default branch or HEAD"}".`,
             `Focus: ${focus ?? "main change themes, affected directories, risky paths, and the shortest useful review plan"}.`,
+            ...workflowGuidance("release"),
             "",
             "Use these tools as needed:",
             "- gitlab_summarize_commit_range",
@@ -566,6 +587,7 @@ export function registerPromptTools(server: McpServer): void {
           lines([
             `Summarize directory "${path ?? "/"}" in project "${project_id}" at ref "${ref ?? "default branch or HEAD"}".`,
             `Focus: ${focus ?? "directory purpose, key files, dominant file types, and the best next files to inspect"}.`,
+            ...workflowGuidance("core"),
             "",
             "Use these tools as needed:",
             "- gitlab_summarize_directory",

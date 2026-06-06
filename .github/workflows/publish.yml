@@ -73,11 +73,23 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Check documentation secrets
+        run: npm run docs:check-secrets
+
       - name: Build
         run: npm run build
 
+      - name: Smoke test source stdio transport
+        run: npm run smoke:stdio
+
+      - name: Smoke test source HTTP transport
+        run: npm run smoke:http
+
       - name: Verify package contents
         run: npm run pack:dry-run
+
+      - name: Smoke test packed package
+        run: npm run smoke:package
 
       - name: Publish to npm
         run: npm publish --access public
@@ -112,3 +124,5 @@ jobs:
 
           npm install --global --prefix "${PREFIX_DIR}" "${PACKAGE_NAME}@${PACKAGE_VERSION}"
           test -x "${PREFIX_DIR}/bin/gitlab-mcp-server"
+          MCP_SMOKE_COMMAND="${PREFIX_DIR}/bin/gitlab-mcp-server" npm run smoke:stdio
+          MCP_SMOKE_COMMAND="${PREFIX_DIR}/bin/gitlab-mcp-server" npm run smoke:http

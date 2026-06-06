@@ -9,6 +9,17 @@ const testConfig: AppConfig = {
   gitlabBaseUrl: "https://gitlab.com/api/v4",
   gitlabToken: "test-token",
   tokenHeaderMode: "bearer",
+  toolProfile: "readonly",
+  enabledTools: [],
+  disabledTools: [],
+  exposeDisabledWriteTools: false,
+  mcpTransport: "stdio",
+  mcpHttpHost: "127.0.0.1",
+  mcpHttpPort: 3333,
+  mcpHttpPath: "/mcp",
+  mcpHttpAllowedOrigins: [],
+  mcpHttpAllowedHosts: ["localhost", "127.0.0.1", "[::1]"],
+  mcpHttpAllowNonLocalhost: false,
   enableWriteTools: false,
   enableDestructiveTools: false,
   enableDryRun: false,
@@ -51,8 +62,7 @@ describe("workflow prompts", () => {
       "gitlab_stale_merge_request_cleanup_workflow",
       "gitlab_summarize_commit_range_workflow",
       "gitlab_summarize_directory_workflow",
-      "gitlab_summarize_project_status_workflow"
-      ,
+      "gitlab_summarize_project_status_workflow",
       "gitlab_team_delivery_digest_workflow"
     ]);
 
@@ -97,6 +107,8 @@ describe("workflow prompts", () => {
     const text = firstMessage.content.type === "text" ? firstMessage.content.text : "";
 
     expect(text).toContain('Review GitLab merge request !42 in project "group/project" objectively.');
+    expect(text).toContain("Recommended tool profile: mr-review.");
+    expect(text).toContain("Prefer structured outputs with summary, status or risk_level, confidence, blockers, warnings, next_actions, and source_links.");
     expect(text).toContain("gitlab_get_merge_request_review_state");
     expect(text).toContain("gitlab_review_merge_request_risks");
     expect(text).toContain("gitlab_trace_merge_request_to_pipeline_failures");
@@ -131,6 +143,8 @@ describe("workflow prompts", () => {
     }
 
     expect(firstMessage.content.text).toContain('Investigate flaky CI behavior in project "group/project".');
+    expect(firstMessage.content.text).toContain("Recommended tool profile: ci-triage.");
+    expect(firstMessage.content.text).toContain("Use output_format=\"markdown\" only when the result is meant to be pasted into chat");
     expect(firstMessage.content.text).toContain("gitlab_find_flaky_jobs");
     expect(firstMessage.content.text).toContain("gitlab_compare_pipeline_runs");
     expect(firstMessage.content.text).toContain("gitlab_trace_job_to_commit_and_merge_request");
@@ -165,6 +179,7 @@ describe("workflow prompts", () => {
     }
 
     expect(firstMessage.content.text).toContain('Assess cross-project delivery health for group "group/platform".');
+    expect(firstMessage.content.text).toContain("Recommended tool profile: delivery.");
     expect(firstMessage.content.text).toContain("gitlab_portfolio_delivery_overview");
     expect(firstMessage.content.text).toContain("gitlab_get_group_delivery_overview");
     expect(firstMessage.content.text).toContain("chat-ready portfolio summary");

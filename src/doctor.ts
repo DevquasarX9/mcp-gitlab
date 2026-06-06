@@ -15,10 +15,29 @@ function bulletList(items: readonly string[]): readonly string[] {
   return items.length > 0 ? items.map((item) => `- ${item}`) : ["- none"];
 }
 
-export function resolveCliMode(argv: readonly string[]): "server" | "doctor" {
+function isLocalHttpHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" ||
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    normalized === "[::1]";
+}
+
+export function resolveCliMode(
+  argv: readonly string[],
+  env: Partial<Pick<NodeJS.ProcessEnv, "MCP_TRANSPORT">> = process.env
+): "server" | "doctor" | "http" {
   const firstArg = argv[0];
 
-  return firstArg === "doctor" || firstArg === "--doctor" ? "doctor" : "server";
+  if (firstArg === "doctor" || firstArg === "--doctor") {
+    return "doctor";
+  }
+
+  if (firstArg === "serve-http" || firstArg === "--http") {
+    return "http";
+  }
+
+  return env.MCP_TRANSPORT === "http" ? "http" : "server";
 }
 
 export function formatDoctorReport(params: {
@@ -65,9 +84,28 @@ export function formatDoctorReport(params: {
     "",
     "Server Posture",
     `- Server mode: ${stringValue(params.advisory.server_mode)}`,
+    `- MCP transport: ${params.config.mcpTransport}`,
+    `- Tool profile: ${params.config.toolProfile}`,
+    `- Disabled write tools exposed: ${booleanLabel(params.config.exposeDisabledWriteTools)}`,
     `- Write tools: ${booleanLabel(params.config.enableWriteTools)}`,
     `- Destructive tools: ${booleanLabel(params.config.enableDestructiveTools)}`,
     `- Dry run: ${booleanLabel(params.config.enableDryRun)}`,
+    "",
+    "HTTP Transport",
+    `- HTTP host: ${params.config.mcpHttpHost}`,
+    `- HTTP port: ${params.config.mcpHttpPort}`,
+    `- HTTP path: ${params.config.mcpHttpPath}`,
+    `- HTTP auth token configured: ${params.config.mcpHttpAuthToken ? "yes" : "no"}`,
+    `- HTTP localhost bind: ${isLocalHttpHost(params.config.mcpHttpHost) ? "yes" : "no"}`,
+    `- HTTP non-local bind override: ${booleanLabel(params.config.mcpHttpAllowNonLocalhost)}`,
+    `- HTTP allowed host count: ${params.config.mcpHttpAllowedHosts.length}`,
+    `- HTTP allowed origin count: ${params.config.mcpHttpAllowedOrigins.length}`,
+    "",
+    "Payload Limits",
+    `- Max file size bytes: ${params.config.maxFileSizeBytes}`,
+    `- Max diff size bytes: ${params.config.maxDiffSizeBytes}`,
+    `- Max API response bytes: ${params.config.maxApiResponseBytes}`,
+    `- GitLab HTTP timeout ms: ${params.config.httpTimeoutMs}`,
     "",
     "Token Summary",
     `- Token kind: ${stringValue(params.advisory.token_kind)}`,
@@ -84,6 +122,8 @@ export function formatDoctorReport(params: {
     `- Group aliases enabled: ${accessControls.group_aliases_enabled === true ? "yes" : "no"}`,
     `- Project alias count: ${typeof accessControls.project_alias_count === "number" ? accessControls.project_alias_count : 0}`,
     `- Group alias count: ${typeof accessControls.group_alias_count === "number" ? accessControls.group_alias_count : 0}`,
+    `- Explicit enabled tool count: ${typeof accessControls.enabled_tool_count === "number" ? accessControls.enabled_tool_count : 0}`,
+    `- Explicit disabled tool count: ${typeof accessControls.disabled_tool_count === "number" ? accessControls.disabled_tool_count : 0}`,
     `- Project allowlist count: ${typeof accessControls.project_allowlist_count === "number" ? accessControls.project_allowlist_count : 0}`,
     `- Group allowlist count: ${typeof accessControls.group_allowlist_count === "number" ? accessControls.group_allowlist_count : 0}`,
     `- Project denylist count: ${typeof accessControls.project_denylist_count === "number" ? accessControls.project_denylist_count : 0}`,
