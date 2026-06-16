@@ -12,6 +12,7 @@ This server is not trying to mirror every official GitLab MCP beta tool one-for-
 | `get_merge_request_commits` | `gitlab_get_merge_request_commits`, MR review/risk workflow tools | Implemented |
 | `get_merge_request_diffs` | `gitlab_get_merge_request_diff` | Implemented |
 | `get_merge_request_pipelines` | `gitlab_get_merge_request_pipelines`, `gitlab_trace_merge_request_to_pipeline_failures`, MR review/risk workflow tools | Implemented, with richer workflow equivalents |
+| GitLab Draft Notes API | `gitlab_list_draft_notes`, `gitlab_get_draft_note`, `gitlab_create_draft_note`, `gitlab_update_draft_note`, `gitlab_delete_draft_note`, `gitlab_publish_draft_note`, `gitlab_bulk_publish_draft_notes` | Implemented; write operations are write-gated |
 | `get_pipeline_jobs` | `gitlab_list_pipeline_jobs` | Implemented |
 | `get_job_log` | `gitlab_get_job_trace`, `gitlab_explain_failed_pipeline` | Implemented with bounded trace output |
 | `manage_pipeline` | `gitlab_list_pipelines`, `gitlab_retry_job`, `gitlab_trigger_pipeline`, `gitlab_cancel_pipeline` | Partial; delete/update pipeline operations are not exposed |
@@ -43,6 +44,7 @@ Reference docs:
 
 - https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server_tools/
 - https://docs.gitlab.com/api/merge_requests/
+- https://docs.gitlab.com/api/draft_notes/
 - https://docs.gitlab.com/api/search/
 - https://docs.gitlab.com/api/labels/
 - https://docs.gitlab.com/api/notes/

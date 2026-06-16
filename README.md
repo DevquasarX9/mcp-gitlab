@@ -450,7 +450,7 @@ The server exposes concrete `gitlab_*` MCP tools. Representative examples:
 - Projects and groups: `gitlab_search`, `gitlab_search_projects`, `gitlab_search_labels`, `gitlab_get_project_dashboard`, `gitlab_get_group_delivery_overview`
 - Repository: `gitlab_get_file`, `gitlab_search_code`, `gitlab_compare_refs`, `gitlab_get_commit_diff`
 - Issues: `gitlab_list_issues`, `gitlab_create_issue`, `gitlab_add_issue_comment`
-- Merge requests: `gitlab_get_merge_request`, `gitlab_get_merge_request_commits`, `gitlab_get_merge_request_pipelines`, `gitlab_get_merge_request_review_state`, `gitlab_merge_merge_request`
+- Merge requests: `gitlab_get_merge_request`, `gitlab_get_merge_request_commits`, `gitlab_get_merge_request_pipelines`, `gitlab_list_draft_notes`, `gitlab_create_draft_note`, `gitlab_bulk_publish_draft_notes`, `gitlab_get_merge_request_review_state`, `gitlab_merge_merge_request`
 - Pipelines: `gitlab_list_pipelines`, `gitlab_explain_failed_pipeline`, `gitlab_find_flaky_jobs`
 - Releases and packages: `gitlab_list_releases`, `gitlab_create_release`, `gitlab_get_package`
 - Governance: `gitlab_get_project_approval_rules`, `gitlab_check_project_write_risk`

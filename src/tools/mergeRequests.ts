@@ -39,6 +39,73 @@ function toReviewerIds(value: unknown): readonly number[] {
     .filter((item): item is number => item !== null);
 }
 
+const draftNotePositionSchema = z.record(z.string(), z.unknown());
+
+export function buildDraftNoteCreateBody(args: {
+  readonly note: string;
+  readonly commit_id?: string;
+  readonly in_reply_to_discussion_id?: string;
+  readonly resolve_discussion?: boolean;
+  readonly position?: JsonMap;
+}): JsonMap {
+  return compactJsonBody({
+    note: args.note,
+    commit_id: args.commit_id,
+    in_reply_to_discussion_id: args.in_reply_to_discussion_id,
+    resolve_discussion: args.resolve_discussion,
+    position: args.position
+  });
+}
+
+export function buildDraftNoteUpdateBody(args: {
+  readonly note?: string;
+  readonly position?: JsonMap;
+}): JsonMap {
+  const body = compactJsonBody({
+    note: args.note,
+    position: args.position
+  });
+
+  if (Object.keys(body).length === 0) {
+    throw new GuardrailError(
+      "Draft note updates require at least one field: note or position.",
+      "EMPTY_DRAFT_NOTE_UPDATE"
+    );
+  }
+
+  return body;
+}
+
+export function normalizeDraftNoteDeleteResponse(args: {
+  readonly responseData: unknown;
+  readonly projectId: string;
+  readonly mergeRequestIid: number;
+  readonly draftNoteId: number;
+}): unknown {
+  if (args.responseData && typeof args.responseData === "object") {
+    return args.responseData;
+  }
+
+  return {
+    deleted: true,
+    project_id: args.projectId,
+    merge_request_iid: args.mergeRequestIid,
+    draft_note_id: args.draftNoteId
+  };
+}
+
+function compactJsonBody(values: JsonMap): JsonMap {
+  const body: JsonMap = {};
+
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== null && value !== "") {
+      body[key] = value;
+    }
+  }
+
+  return body;
+}
+
 async function getMergeRequestVersion(
   client: ToolDeps["client"],
   projectId: string,
@@ -442,6 +509,230 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
         pagination: response.pagination,
         content_is_untrusted: true
       };
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_list_draft_notes",
+    title: "List Draft Notes",
+    description: "List draft notes pending publication for a merge request.",
+    safety: "read-only",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      page: z.number().int().positive().optional(),
+      per_page: z.number().int().positive().max(100).optional()
+    },
+    handler: async (args, { client, requireProject }) => {
+      await requireProject(args.project_id);
+      const response = await client.getJson<JsonMap[]>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes`,
+        {
+          query: cleanQuery({
+            page: args.page,
+            per_page: args.per_page
+          })
+        }
+      );
+
+      return {
+        items: response.data,
+        pagination: response.pagination,
+        content_is_untrusted: true
+      };
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_get_draft_note",
+    title: "Get Draft Note",
+    description: "Retrieve a single draft note from a merge request.",
+    safety: "read-only",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      draft_note_id: z.number().int().positive()
+    },
+    handler: async (args, { client, requireProject }) => {
+      await requireProject(args.project_id);
+      const response = await client.getJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}`
+      );
+
+      return {
+        ...response.data,
+        content_is_untrusted: true
+      };
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_create_draft_note",
+    title: "Create Draft Note",
+    description: "Create an unpublished draft note on a merge request for later review publication.",
+    safety: "safe-write",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      note: z.string().trim().min(1),
+      commit_id: z.string().trim().optional(),
+      in_reply_to_discussion_id: z.string().trim().optional(),
+      resolve_discussion: z.boolean().optional(),
+      position: draftNotePositionSchema.optional()
+    },
+    handler: async (args, { client, requireProject, config }) => {
+      const project = await requireProject(args.project_id);
+      assertDeveloperAccess(project);
+
+      const body = buildDraftNoteCreateBody(args);
+
+      if (config.enableDryRun) {
+        return {
+          dry_run: true,
+          endpoint: `/projects/${args.project_id}/merge_requests/${args.merge_request_iid}/draft_notes`,
+          body
+        };
+      }
+
+      const response = await client.postJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes`,
+        { body }
+      );
+
+      return response.data;
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_update_draft_note",
+    title: "Update Draft Note",
+    description: "Update an unpublished draft note on a merge request.",
+    safety: "safe-write",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      draft_note_id: z.number().int().positive(),
+      note: z.string().trim().min(1).optional(),
+      position: draftNotePositionSchema.optional()
+    },
+    handler: async (args, { client, requireProject, config }) => {
+      const project = await requireProject(args.project_id);
+      assertDeveloperAccess(project);
+
+      const body = buildDraftNoteUpdateBody(args);
+
+      if (config.enableDryRun) {
+        return {
+          dry_run: true,
+          endpoint: `/projects/${args.project_id}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}`,
+          body
+        };
+      }
+
+      const response = await client.putJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}`,
+        { body }
+      );
+
+      return response.data;
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_delete_draft_note",
+    title: "Delete Draft Note",
+    description: "Delete an unpublished draft note from a merge request.",
+    safety: "safe-write",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      draft_note_id: z.number().int().positive()
+    },
+    handler: async (args, { client, requireProject, config }) => {
+      const project = await requireProject(args.project_id);
+      assertDeveloperAccess(project);
+
+      if (config.enableDryRun) {
+        return {
+          dry_run: true,
+          endpoint: `/projects/${args.project_id}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}`
+        };
+      }
+
+      const response = await client.deleteJson<unknown>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}`
+      );
+
+      return normalizeDraftNoteDeleteResponse({
+        responseData: response.data,
+        projectId: args.project_id,
+        mergeRequestIid: args.merge_request_iid,
+        draftNoteId: args.draft_note_id
+      });
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_publish_draft_note",
+    title: "Publish Draft Note",
+    description: "Publish one pending draft note on a merge request.",
+    safety: "safe-write",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive(),
+      draft_note_id: z.number().int().positive()
+    },
+    handler: async (args, { client, requireProject, config }) => {
+      const project = await requireProject(args.project_id);
+      assertDeveloperAccess(project);
+
+      if (config.enableDryRun) {
+        return {
+          dry_run: true,
+          endpoint: `/projects/${args.project_id}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}/publish`
+        };
+      }
+
+      const response = await client.putJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes/${args.draft_note_id}/publish`
+      );
+
+      return response.data;
+    }
+  });
+
+  registerTool(deps, {
+    name: "gitlab_bulk_publish_draft_notes",
+    title: "Bulk Publish Draft Notes",
+    description: "Publish all pending draft notes for a merge request that belong to the current user.",
+    safety: "safe-write",
+    category: "merge-requests",
+    inputSchema: {
+      project_id: z.string().trim().min(1),
+      merge_request_iid: z.number().int().positive()
+    },
+    handler: async (args, { client, requireProject, config }) => {
+      const project = await requireProject(args.project_id);
+      assertDeveloperAccess(project);
+
+      if (config.enableDryRun) {
+        return {
+          dry_run: true,
+          endpoint: `/projects/${args.project_id}/merge_requests/${args.merge_request_iid}/draft_notes/bulk_publish`
+        };
+      }
+
+      const response = await client.postJson<JsonMap>(
+        `/projects/${encodeURIComponent(args.project_id)}/merge_requests/${args.merge_request_iid}/draft_notes/bulk_publish`
+      );
+
+      return response.data;
     }
   });
 

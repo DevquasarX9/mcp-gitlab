@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Added GitLab Draft Notes tools for merge request review workflows, including create, update, delete, publish one, and bulk publish support behind the existing write gates.
+
 ## 0.3.0 - 2026-06-07
 
 - Default MCP tool exposure now uses the `readonly` profile.

@@ -63,8 +63,11 @@ describe("tool profiles", () => {
     expect(names).toContain("gitlab_get_merge_request");
     expect(names).toContain("gitlab_get_merge_request_commits");
     expect(names).toContain("gitlab_get_merge_request_pipelines");
+    expect(names).toContain("gitlab_list_draft_notes");
+    expect(names).toContain("gitlab_get_draft_note");
     expect(names).toContain("gitlab_get_pipeline");
     expect(names).not.toContain("gitlab_create_issue");
+    expect(names).not.toContain("gitlab_create_draft_note");
     expect(names).not.toContain("gitlab_merge_merge_request");
   });
 
@@ -76,6 +79,7 @@ describe("tool profiles", () => {
 
     expect(names).toContain("gitlab_get_issue");
     expect(names).not.toContain("gitlab_create_issue");
+    expect(names).not.toContain("gitlab_create_draft_note");
     expect(names).not.toContain("gitlab_cancel_pipeline");
   });
 
@@ -87,6 +91,7 @@ describe("tool profiles", () => {
     });
 
     expect(names).toContain("gitlab_create_issue");
+    expect(names).toContain("gitlab_create_draft_note");
     expect(names).toContain("gitlab_merge_merge_request");
   });
 
@@ -98,6 +103,11 @@ describe("tool profiles", () => {
     });
 
     expect(writeOnlyNames).toContain("gitlab_create_issue");
+    expect(writeOnlyNames).toContain("gitlab_create_draft_note");
+    expect(writeOnlyNames).toContain("gitlab_update_draft_note");
+    expect(writeOnlyNames).toContain("gitlab_delete_draft_note");
+    expect(writeOnlyNames).toContain("gitlab_publish_draft_note");
+    expect(writeOnlyNames).toContain("gitlab_bulk_publish_draft_notes");
     expect(writeOnlyNames).not.toContain("gitlab_merge_merge_request");
 
     const destructiveNames = await listToolNames({
@@ -108,6 +118,20 @@ describe("tool profiles", () => {
     });
 
     expect(destructiveNames).toContain("gitlab_merge_merge_request");
+  });
+
+  it("exposes draft-note write tools in the maintainer-write profile when writes are enabled", async () => {
+    const names = await listToolNames({
+      ...baseConfig,
+      toolProfile: "maintainer-write",
+      enableWriteTools: true
+    });
+
+    expect(names).toContain("gitlab_create_draft_note");
+    expect(names).toContain("gitlab_update_draft_note");
+    expect(names).toContain("gitlab_delete_draft_note");
+    expect(names).toContain("gitlab_publish_draft_note");
+    expect(names).toContain("gitlab_bulk_publish_draft_notes");
   });
 
   it("honors explicit tool allow and deny lists after profile selection", async () => {
