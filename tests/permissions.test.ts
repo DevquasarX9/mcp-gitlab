@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { assertCommentAccess, assertDeveloperAccess, assertMaintainerAccess } from "../src/tools/shared.js";
+import {
+  assertCommentAccess,
+  assertDeveloperAccess,
+  assertInternalNoteAccess,
+  assertMaintainerAccess
+} from "../src/tools/shared.js";
 
 describe("project permission checks", () => {
   it("requires guest access for comment operations", () => {
@@ -21,6 +26,30 @@ describe("project permission checks", () => {
         permissions: {
           project_access: {
             access_level: 10
+          }
+        }
+      })
+    ).not.toThrow();
+  });
+
+  it("requires reporter access for internal note operations", () => {
+    expect(() =>
+      assertInternalNoteAccess({
+        permissions: {
+          project_access: {
+            access_level: 10
+          }
+        }
+      })
+    ).toThrow(/Reporter-level access/);
+  });
+
+  it("accepts reporter access for internal note operations", () => {
+    expect(() =>
+      assertInternalNoteAccess({
+        permissions: {
+          project_access: {
+            access_level: 20
           }
         }
       })
