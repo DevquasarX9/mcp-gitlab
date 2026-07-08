@@ -56,6 +56,8 @@ Write mode is only the MCP server-side feature gate. It does not expand the conf
 
 Comment-style write tools, including issue comments, merge request comments, merge request discussion replies, and draft notes, require Guest-level project access in-server. Other safe-write tools continue to require Developer-level access unless the tool documents a more specific GitLab permission.
 
+When GitLab omits effective access from the project `permissions` payload, the server falls back to the authenticated user's effective project membership from the project members API before applying the local access guard. GitLab's API permission check still remains the final authority on execution.
+
 Destructive operations require:
 
 1. Destructive mode enabled

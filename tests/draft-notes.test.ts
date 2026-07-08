@@ -209,10 +209,36 @@ async function callDraftNoteTool(name: string, args: Record<string, unknown>) {
       id: 1,
       path_with_namespace: "group/project",
       permissions: {
-        project_access: {
-          access_level: 10
-        }
+        project_access: null,
+        group_access: null
       }
+    }, {
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+  gitlab
+    .intercept({
+      method: "GET",
+      path: "/api/v4/user"
+    })
+    .reply(200, {
+      id: 1001,
+      username: "review.user"
+    }, {
+      headers: {
+        "content-type": "application/json"
+      }
+    });
+  gitlab
+    .intercept({
+      method: "GET",
+      path: "/api/v4/projects/group%2Fproject/members/all/1001"
+    })
+    .reply(200, {
+      id: 1001,
+      username: "review.user",
+      access_level: 10
     }, {
       headers: {
         "content-type": "application/json"
