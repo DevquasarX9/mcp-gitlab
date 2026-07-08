@@ -210,7 +210,7 @@ async function callDraftNoteTool(name: string, args: Record<string, unknown>) {
       path_with_namespace: "group/project",
       permissions: {
         project_access: {
-          access_level: 30
+          access_level: 10
         }
       }
     }, {

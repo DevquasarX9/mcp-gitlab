@@ -233,6 +233,15 @@ export function assertMaintainerAccess(project: JsonMap): void {
   }
 }
 
+export function assertCommentAccess(project: JsonMap): void {
+  if (accessLevelOf(project) < ACCESS_LEVEL.guest) {
+    throw new GuardrailError(
+      "This operation requires Guest-level access or higher on the target project.",
+      "INSUFFICIENT_PROJECT_ACCESS"
+    );
+  }
+}
+
 export function assertDeveloperAccess(project: JsonMap): void {
   if (accessLevelOf(project) < ACCESS_LEVEL.developer) {
     throw new GuardrailError(

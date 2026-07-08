@@ -1,9 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import { assertDeveloperAccess, assertMaintainerAccess } from "../src/tools/shared.js";
+import { assertCommentAccess, assertDeveloperAccess, assertMaintainerAccess } from "../src/tools/shared.js";
 
 describe("project permission checks", () => {
-  it("requires developer access for write operations", () => {
+  it("requires guest access for comment operations", () => {
+    expect(() =>
+      assertCommentAccess({
+        permissions: {
+          project_access: {
+            access_level: 0
+          }
+        }
+      })
+    ).toThrow(/Guest-level access/);
+  });
+
+  it("accepts guest access for comment operations", () => {
+    expect(() =>
+      assertCommentAccess({
+        permissions: {
+          project_access: {
+            access_level: 10
+          }
+        }
+      })
+    ).not.toThrow();
+  });
+
+  it("requires developer access for non-comment write operations", () => {
     expect(() =>
       assertDeveloperAccess({
         permissions: {
