@@ -5,7 +5,7 @@ import { z } from "zod";
 import { GuardrailError } from "../gitlab/errors.js";
 import type { JsonMap } from "../gitlab/types.js";
 import { assertMaxSize } from "../security/guards.js";
-import { assertDeveloperAccess, cleanQuery, registerTool, type ToolDeps } from "./shared.js";
+import { assertCommentAccess, assertDeveloperAccess, cleanQuery, registerTool, type ToolDeps } from "./shared.js";
 
 function labelsToCsv(labels?: readonly string[]): string | undefined {
   if (!labels || labels.length === 0) {
@@ -585,7 +585,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       const body = buildDraftNoteCreateBody(args);
 
@@ -621,7 +621,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       const body = buildDraftNoteUpdateBody(args);
 
@@ -655,7 +655,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       if (config.enableDryRun) {
         return {
@@ -690,7 +690,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       if (config.enableDryRun) {
         return {
@@ -719,7 +719,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       if (config.enableDryRun) {
         return {
@@ -754,7 +754,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       let body: JsonMap = {
         body: args.body
@@ -798,7 +798,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       const body = {
         body: args.body
@@ -1157,7 +1157,7 @@ export function registerMergeRequestTools(deps: ToolDeps): void {
     },
     handler: async (args, { client, requireProject, config }) => {
       const project = await requireProject(args.project_id);
-      assertDeveloperAccess(project);
+      assertCommentAccess(project);
 
       const body = {
         body: args.body,

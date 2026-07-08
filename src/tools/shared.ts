@@ -45,6 +45,8 @@ interface ToolDefinition<TSchema extends z.ZodRawShape> {
   ) => Promise<unknown>;
 }
 
+const EFFECTIVE_PROJECT_ACCESS_LEVEL = "__mcp_effective_project_access_level";
+
 export function registerTool<TSchema extends z.ZodRawShape>(
   deps: ToolDeps,
   definition: ToolDefinition<TSchema>
@@ -95,6 +97,7 @@ export function registerTool<TSchema extends z.ZodRawShape>(
           );
           const project = await getProject(deps.client, resolvedProjectId);
           assertProjectAllowed(deps.config, project);
+          await attachEffectiveProjectAccessLevel(deps.client, resolvedProjectId, project);
           return project;
         },
         requireGroup: async (groupId: string) => {
@@ -220,14 +223,71 @@ export function accessLevelOf(project: JsonMap): number {
 
   const projectLevel = typeof projectAccess?.access_level === "number" ? projectAccess.access_level : 0;
   const groupLevel = typeof groupAccess?.access_level === "number" ? groupAccess.access_level : 0;
+  const effectiveLevel = typeof project[EFFECTIVE_PROJECT_ACCESS_LEVEL] === "number"
+    ? project[EFFECTIVE_PROJECT_ACCESS_LEVEL]
+    : 0;
 
-  return Math.max(projectLevel, groupLevel);
+  return Math.max(projectLevel, groupLevel, effectiveLevel);
+}
+
+async function attachEffectiveProjectAccessLevel(
+  client: GitLabClient,
+  projectId: string,
+  project: JsonMap
+): Promise<void> {
+  if (accessLevelOf(project) > 0) {
+    return;
+  }
+
+  const accessLevel = await getCurrentUserProjectAccessLevel(client, projectId);
+
+  if (accessLevel === 0) {
+    return;
+  }
+
+  Object.defineProperty(project, EFFECTIVE_PROJECT_ACCESS_LEVEL, {
+    configurable: true,
+    enumerable: false,
+    value: accessLevel
+  });
+}
+
+async function getCurrentUserProjectAccessLevel(
+  client: GitLabClient,
+  projectId: string
+): Promise<number> {
+  try {
+    const userResponse = await client.getJson<JsonMap>("/user");
+    const userId = userResponse.data.id;
+
+    if (typeof userId !== "number") {
+      return 0;
+    }
+
+    const memberResponse = await client.getJson<JsonMap>(
+      `/projects/${encodeURIComponent(projectId)}/members/all/${userId}`
+    );
+    const accessLevel = memberResponse.data.access_level;
+
+    return typeof accessLevel === "number" ? accessLevel : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function assertMaintainerAccess(project: JsonMap): void {
   if (accessLevelOf(project) < ACCESS_LEVEL.maintainer) {
     throw new GuardrailError(
       "This operation requires Maintainer-level access or higher on the target project.",
+      "INSUFFICIENT_PROJECT_ACCESS"
+    );
+  }
+}
+
+export function assertCommentAccess(project: JsonMap): void {
+  if (accessLevelOf(project) < ACCESS_LEVEL.guest) {
+    throw new GuardrailError(
+      "This operation requires Guest-level access or higher on the target project.",
       "INSUFFICIENT_PROJECT_ACCESS"
     );
   }
