@@ -54,7 +54,7 @@ Write operations require:
 
 Write mode is only the MCP server-side feature gate. It does not expand the configured GitLab credential. If a write tool reaches GitLab and returns `insufficient_scope`, the MCP write guard has already passed and the token itself lacks the required GitLab scope, usually `api` for write-capable REST or GraphQL operations.
 
-Comment-style write tools, including issue comments, merge request comments, merge request discussion replies, and draft notes, require Guest-level project access in-server. Other safe-write tools continue to require Developer-level access unless the tool documents a more specific GitLab permission.
+Comment-style write tools, including issue comments, merge request comments, merge request discussion replies, and draft notes, require Guest-level project access in-server. Internal issue and merge request notes require Reporter-level access. Other safe-write tools continue to require Developer-level access unless the tool documents a more specific GitLab permission.
 
 When GitLab omits effective access from the project `permissions` payload, the server falls back to the authenticated user's effective project membership from the project members API before applying the local access guard. GitLab's API permission check still remains the final authority on execution.
 
