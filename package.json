@@ -74,7 +74,7 @@
     "node": ">=20.11.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "dotenv": "17.4.2",
     "undici": "8.5.0",
     "zod": "4.3.6"
